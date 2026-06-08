@@ -22,7 +22,15 @@
       banner.style.fontWeight = 'bold';
       banner.style.lineHeight = '1.5';
       banner.style.boxShadow = '0 5px 25px rgba(0,0,0,0.5)';
-      banner.innerHTML = `⚠️ BROWSER JS ERROR DETECTED:<br>${message}<br><span style="font-weight:normal;font-size:11px;">in ${source} at line ${lineno}:${colno}</span>`;
+      
+      let errorMsg = `⚠️ BROWSER JS ERROR DETECTED:<br>${message}<br><span style="font-weight:normal;font-size:11px;">in ${source} at line ${lineno}:${colno}</span>`;
+      
+      // Check for local file protocol CORS errors
+      if (window.location.protocol === 'file:') {
+        errorMsg += `<br><br><span style="background-color:rgba(0,0,0,0.3);padding:12px;display:block;margin-top:8px;border-radius:4px;font-weight:bold;color:#ffeb3b;line-height:1.6;">CORS Security Block: You have opened the HTML file directly from your disk (file:///...).<br>Modern browsers block local Web Workers, ES modules, and CDN fetches on file URLs.<br><br>💡 To fix this, please run the local server using: <code style="background:#000;color:#0f0;padding:2px 6px;border-radius:3px;font-family:monospace;">python server.py</code> or <code style="background:#000;color:#0f0;padding:2px 6px;border-radius:3px;font-family:monospace;">npx http-server</code> and open <a href="http://127.0.0.1:8080" style="color:#00f0ff;text-decoration:underline;font-weight:bold;" target="_blank">http://127.0.0.1:8080</a> in your browser.</span>`;
+      }
+      
+      banner.innerHTML = errorMsg;
       document.body.appendChild(banner);
       return false;
     };
@@ -42,18 +50,24 @@
       banner.style.fontWeight = 'bold';
       banner.style.lineHeight = '1.5';
       banner.style.boxShadow = '0 5px 25px rgba(0,0,0,0.5)';
-      banner.innerHTML = `⚠️ UNHANDLED PROMISE REJECTION:<br>${event.reason}`;
+      
+      let errorMsg = `⚠️ UNHANDLED PROMISE REJECTION:<br>${event.reason}`;
+      if (window.location.protocol === 'file:') {
+        errorMsg += `<br><br><span style="background-color:rgba(0,0,0,0.3);padding:12px;display:block;margin-top:8px;border-radius:4px;font-weight:bold;color:#ffeb3b;line-height:1.6;">CORS Security Block: You have opened the HTML file directly from your disk (file:///...).<br>Modern browsers block local Web Workers, ES modules, and CDN fetches on file URLs.<br><br>💡 To fix this, please run the local server using: <code style="background:#000;color:#0f0;padding:2px 6px;border-radius:3px;font-family:monospace;">python server.py</code> or <code style="background:#000;color:#0f0;padding:2px 6px;border-radius:3px;font-family:monospace;">npx http-server</code> and open <a href="http://127.0.0.1:8080" style="color:#00f0ff;text-decoration:underline;font-weight:bold;" target="_blank">http://127.0.0.1:8080</a> in your browser.</span>`;
+      }
+      
+      banner.innerHTML = errorMsg;
       document.body.appendChild(banner);
     });
   </script>
   <!-- Google Fonts for premium typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&family=Montserrat:ital,wght@0,300;0,400;0,700;0,900;1,900&family=Oswald:wght@400;700&family=Outfit:wght@400;600;800&family=Poppins:wght@400;600;700;900&family=Rubik:wght@400;700;900&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@400;700&family=Montserrat:wght@400;700;900&family=Oswald:wght@400;700;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Poppins:wght@400;700;900&family=Rubik:wght@400;700;900&display=swap" rel="stylesheet">
   <!-- FontAwesome for professional modern icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <!-- WaveSurfer.js for high-fidelity interactive waveforms -->
-  <script src="https://unpkg.com/wavesurfer.js@7"></script>
+  <script src="https://unpkg.com/wavesurfer.js@7" crossorigin="anonymous"></script>
   <!-- Main Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
@@ -83,301 +97,312 @@
         <span class="status-text" id="statusText">AI Model Offline</span>
       </div>
       <div class="header-actions">
-        <button id="btnSettings" class="icon-btn" title="API Settings"><i class="fa-solid fa-cog"></i> Settings</button>
+        <!-- Settings button for Header -->
+        <button id="btnSettings" class="icon-btn" title="API Settings"><i class="fa-solid fa-cog"></i> <span class="desktop-only-header">Settings</span></button>
+
+        <!-- Unified Save/Export Dropdown for Mobile Header -->
+        <div class="export-dropdown mobile-only-header">
+          <button id="btnExportToggle" class="btn-primary" disabled>
+            <i class="fa-solid fa-download"></i> Export <i class="fa-solid fa-chevron-down" style="font-size: 0.75rem; margin-left: 4px;"></i>
+          </button>
+          <div class="export-dropdown-content hidden" id="exportDropdownMenu">
+            <button class="dropdown-item btn-export-video" id="btnExportVideoMobile"><i class="fa-solid fa-video"></i> Render Subtitles Video</button>
+            <button class="dropdown-item btn-export-srt" id="btnExportSRTMobile"><i class="fa-solid fa-file-lines"></i> Export .SRT Subtitles</button>
+          </div>
+        </div>
       </div>
     </header>
 
-    <!-- Main Workspace Grid -->
-    <main class="workspace-grid">
-      <!-- Left Panel: Stylist & Presets -->
-      <section class="panel left-panel glass-panel">
-        <div class="panel-header">
-          <i class="fa-solid fa-palette"></i>
-          <h2>Caption Customizer</h2>
-        </div>
-        <div class="panel-content scrollable">
-          <!-- Presets Section -->
-          <div class="section-card presets-card">
-            <h3><i class="fa-solid fa-wand-magic"></i> Style Presets</h3>
-            <div class="preset-grid">
-              <button class="preset-btn active" data-preset="classic_bold">
-                <span class="preset-preview classic-bold-text">CLASSIC <span style="color: #ffeb3b;">BOLD</span></span>
-                <span class="preset-label">Classic Bold</span>
-              </button>
-              <button class="preset-btn" data-preset="tiktok_kinetic">
-                <span class="preset-preview tiktok-kinetic-text">FAST <span style="color: #00f0ff;">POP</span></span>
-                <span class="preset-label">TikTok Kinetic</span>
-              </button>
-              <button class="preset-btn" data-preset="aesthetic_minimalist">
-                <span class="preset-preview aesthetic-minimalist-text">Aesthetic Vlog</span>
-                <span class="preset-label">Aesthetic Minimal</span>
-              </button>
-              <button class="preset-btn" data-preset="thought_leadership">
-                <span class="preset-preview thought-leader-text">Thought <span style="color: #4f46e5;">Leader</span></span>
-                <span class="preset-label">Thought Leader</span>
-              </button>
-            </div>
+    <!-- Main Workspace Layout -->
+    <main class="editor-workspace">
+      
+      <!-- DESKTOP 3-COLUMN LAYOUT -->
+      <div class="desktop-layout" id="desktopLayout">
+        <!-- Left Panel: Caption Customizer -->
+        <section class="panel left-panel glass-panel">
+          <div class="panel-header">
+            <i class="fa-solid fa-palette"></i>
+            <h2>Caption Customizer</h2>
           </div>
-
-          <!-- Typography Customizer -->
-          <details class="section-card collapsible-section" open>
-            <summary class="section-card-header">
-              <h3><i class="fa-solid fa-font"></i> Typography</h3>
-            </summary>
-            <div class="section-card-content">
-              <div class="control-group">
-                <label for="fontFamily">Font Family</label>
-                <select id="fontFamily">
-                  <option value="Montserrat" selected>Montserrat Black (Bold)</option>
-                  <option value="Impact">Impact (Classic Loud)</option>
-                  <option value="Poppins">Poppins Black</option>
-                  <option value="Oswald">Oswald Bold</option>
-                  <option value="Outfit">Outfit Heavy</option>
-                  <option value="Rubik">Rubik Black</option>
-                  <option value="Inter">Inter UI Bold</option>
-                </select>
+          <div class="panel-content scrollable" id="desktopLeftContent">
+            <!-- Style cards are placed here by default -->
+            <!-- 1. Presets Card -->
+            <div class="section-card presets-card" id="stylePresetsCard">
+              <h3><i class="fa-solid fa-wand-magic"></i> Style Presets</h3>
+              <div class="preset-grid">
+                <button class="preset-btn active" data-preset="classic_bold">
+                  <span class="preset-preview classic-bold-text">CLASSIC <span style="color: #ffeb3b;">BOLD</span></span>
+                  <span class="preset-label">Classic Bold</span>
+                </button>
+                <button class="preset-btn" data-preset="tiktok_kinetic">
+                  <span class="preset-preview tiktok-kinetic-text">FAST <span style="color: #00f0ff;">POP</span></span>
+                  <span class="preset-label">TikTok Kinetic</span>
+                </button>
+                <button class="preset-btn" data-preset="aesthetic_minimalist">
+                  <span class="preset-preview aesthetic-minimalist-text">Aesthetic Vlog</span>
+                  <span class="preset-label">Aesthetic Minimal</span>
+                </button>
+                <button class="preset-btn" data-preset="thought_leadership">
+                  <span class="preset-preview thought-leader-text">Thought <span style="color: #4f46e5;">Leader</span></span>
+                  <span class="preset-label">Thought Leader</span>
+                </button>
               </div>
-              <div class="control-row">
-                <div class="control-group flex-1">
-                  <label for="fontSize">Size (px)</label>
-                  <input type="number" id="fontSize" value="56" min="16" max="150">
-                </div>
-                <div class="control-group flex-1">
-                  <label for="fontWeight">Weight</label>
-                  <select id="fontWeight">
-                    <option value="400">Regular (400)</option>
-                    <option value="600">Medium (600)</option>
-                    <option value="800">Extra Bold (800)</option>
-                    <option value="900" selected>Black (900)</option>
+            </div>
+
+            <!-- 2. Typography Accordion -->
+            <details class="section-card collapsible-section" id="styleTypographyCard" open>
+              <summary class="section-card-header">
+                <h3><i class="fa-solid fa-font"></i> Typography</h3>
+              </summary>
+              <div class="section-card-content">
+                <div class="control-group">
+                  <label for="fontFamily">Font Family</label>
+                  <select id="fontFamily">
+                    <option value="Montserrat" selected>Montserrat Black (Bold)</option>
+                    <option value="Impact">Impact (Classic Loud)</option>
+                    <option value="Poppins">Poppins Black</option>
+                    <option value="Oswald">Oswald Bold</option>
+                    <option value="Outfit">Outfit Heavy</option>
+                    <option value="Rubik">Rubik Black</option>
+                    <option value="Inter">Inter UI Bold</option>
                   </select>
                 </div>
-              </div>
-              <div class="control-row checkbox-row">
-                <label class="custom-checkbox">
-                  <input type="checkbox" id="textUppercase" checked>
-                  <span class="checkmark"></span>
-                  Force UPPERCASE
-                </label>
-                <label class="custom-checkbox">
-                  <input type="checkbox" id="textItalic">
-                  <span class="checkmark"></span>
-                  Italic Slant
-                </label>
-              </div>
-              <div class="control-group">
-                <label for="letterSpacing">Letter Spacing (px)</label>
-                <input type="range" id="letterSpacing" min="-5" max="15" value="0" step="1">
-              </div>
-            </div>
-          </details>
-
-          <!-- Color Styles -->
-          <details class="section-card collapsible-section" open>
-            <summary class="section-card-header">
-              <h3><i class="fa-solid fa-droplet"></i> Colors & Highlights</h3>
-            </summary>
-            <div class="section-card-content">
-              <div class="control-row">
-                <div class="control-group flex-1">
-                  <label for="textColor">Text Color</label>
-                  <div class="color-picker-wrapper">
-                    <input type="color" id="textColor" value="#ffffff">
-                    <span class="color-value">#FFFFFF</span>
-                  </div>
-                </div>
-                <div class="control-group flex-1">
-                  <label for="highlightColor">Active Highlight</label>
-                  <div class="color-picker-wrapper">
-                    <input type="color" id="highlightColor" value="#ffeb3b">
-                    <span class="color-value">#FFEB3B</span>
-                  </div>
-                </div>
-              </div>
-              <div class="control-row">
-                <div class="control-group flex-1">
-                  <label for="strokeColor">Outline Color</label>
-                  <div class="color-picker-wrapper">
-                    <input type="color" id="strokeColor" value="#000000">
-                    <span class="color-value">#000000</span>
-                  </div>
-                </div>
-                <div class="control-group flex-1">
-                  <label for="strokeWidth">Outline Width (px)</label>
-                  <input type="range" id="strokeWidth" min="0" max="15" value="6" step="1">
-                </div>
-              </div>
-              <div class="control-row">
-                <div class="control-group flex-1">
-                  <label for="shadowColor">Shadow Color</label>
-                  <div class="color-picker-wrapper">
-                    <input type="color" id="shadowColor" value="#000000">
-                    <span class="color-value">#000000</span>
-                  </div>
-                </div>
-                <div class="control-group flex-1">
-                  <label for="shadowBlur">Shadow Blur (px)</label>
-                  <input type="range" id="shadowBlur" min="0" max="25" value="8" step="1">
-                </div>
-              </div>
-              <!-- Bounding Box Style (Background) -->
-              <div class="control-group">
-                <label class="custom-checkbox">
-                  <input type="checkbox" id="showBoxBg">
-                  <span class="checkmark"></span>
-                  Enable Background Box
-                </label>
-              </div>
-              <div id="boxBgControls" class="nested-controls hidden">
                 <div class="control-row">
                   <div class="control-group flex-1">
-                    <label for="boxBgColor">Box Color</label>
+                    <label for="fontSize">Size (px)</label>
+                    <input type="number" id="fontSize" value="56" min="16" max="150">
+                  </div>
+                  <div class="control-group flex-1">
+                    <label for="fontWeight">Weight</label>
+                    <select id="fontWeight">
+                      <option value="400">Regular (400)</option>
+                      <option value="600">Medium (600)</option>
+                      <option value="800">Extra Bold (800)</option>
+                      <option value="900" selected>Black (900)</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="control-row checkbox-row">
+                  <label class="custom-checkbox">
+                    <input type="checkbox" id="textUppercase" checked>
+                    <span class="checkmark"></span>
+                    Force UPPERCASE
+                  </label>
+                  <label class="custom-checkbox">
+                    <input type="checkbox" id="textItalic">
+                    <span class="checkmark"></span>
+                    Italic Slant
+                  </label>
+                </div>
+                <div class="control-group">
+                  <label for="letterSpacing">Letter Spacing (px)</label>
+                  <input type="range" id="letterSpacing" min="-5" max="15" value="0" step="1">
+                </div>
+              </div>
+            </details>
+
+            <!-- 3. Colors Accordion -->
+            <details class="section-card collapsible-section" id="styleColorsCard" open>
+              <summary class="section-card-header">
+                <h3><i class="fa-solid fa-droplet"></i> Colors & Highlights</h3>
+              </summary>
+              <div class="section-card-content">
+                <div class="control-row">
+                  <div class="control-group flex-1">
+                    <label for="textColor">Text Color</label>
                     <div class="color-picker-wrapper">
-                      <input type="color" id="boxBgColor" value="#000000">
+                      <input type="color" id="textColor" value="#ffffff">
+                      <span class="color-value">#FFFFFF</span>
+                    </div>
+                  </div>
+                  <div class="control-group flex-1">
+                    <label for="highlightColor">Active Highlight</label>
+                    <div class="color-picker-wrapper">
+                      <input type="color" id="highlightColor" value="#ffeb3b">
+                      <span class="color-value">#FFEB3B</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="control-row">
+                  <div class="control-group flex-1">
+                    <label for="strokeColor">Outline Color</label>
+                    <div class="color-picker-wrapper">
+                      <input type="color" id="strokeColor" value="#000000">
                       <span class="color-value">#000000</span>
                     </div>
                   </div>
                   <div class="control-group flex-1">
-                    <label for="boxBgOpacity">Opacity (%)</label>
-                    <input type="range" id="boxBgOpacity" min="10" max="100" value="80">
+                    <label for="strokeWidth">Outline Width (px)</label>
+                    <input type="range" id="strokeWidth" min="0" max="15" value="6" step="1">
                   </div>
                 </div>
                 <div class="control-row">
                   <div class="control-group flex-1">
-                    <label for="boxPadding">Padding (px)</label>
-                    <input type="number" id="boxPadding" value="12" min="2" max="40">
+                    <label for="shadowColor">Shadow Color</label>
+                    <div class="color-picker-wrapper">
+                      <input type="color" id="shadowColor" value="#000000">
+                      <span class="color-value">#000000</span>
+                    </div>
                   </div>
                   <div class="control-group flex-1">
-                    <label for="boxBorderRadius">Radius (px)</label>
-                    <input type="number" id="boxBorderRadius" value="8" min="0" max="30">
+                    <label for="shadowBlur">Shadow Blur (px)</label>
+                    <input type="range" id="shadowBlur" min="0" max="25" value="8" step="1">
+                  </div>
+                </div>
+                <div class="control-group">
+                  <label class="custom-checkbox">
+                    <input type="checkbox" id="showBoxBg">
+                    <span class="checkmark"></span>
+                    Enable Background Box
+                  </label>
+                </div>
+                <div id="boxBgControls" class="nested-controls hidden">
+                  <div class="control-row">
+                    <div class="control-group flex-1">
+                      <label for="boxBgColor">Box Color</label>
+                      <div class="color-picker-wrapper">
+                        <input type="color" id="boxBgColor" value="#000000">
+                        <span class="color-value">#000000</span>
+                      </div>
+                    </div>
+                    <div class="control-group flex-1">
+                      <label for="boxBgOpacity">Opacity (%)</label>
+                      <input type="range" id="boxBgOpacity" min="10" max="100" value="80">
+                    </div>
+                  </div>
+                  <div class="control-row">
+                    <div class="control-group flex-1">
+                      <label for="boxPadding">Padding (px)</label>
+                      <input type="number" id="boxPadding" value="12" min="2" max="40">
+                    </div>
+                    <div class="control-group flex-1">
+                      <label for="boxBorderRadius">Radius (px)</label>
+                      <input type="number" id="boxBorderRadius" value="8" min="0" max="30">
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </details>
+            </details>
 
-          <!-- Layout & Position -->
-          <details class="section-card collapsible-section" open>
-            <summary class="section-card-header">
-              <h3><i class="fa-solid fa-arrows-to-eye"></i> Layout & Alignment</h3>
-            </summary>
-            <div class="section-card-content">
-              <div class="control-group">
-                <label for="captionPosition">Vertical Position (Y-axis %)</label>
-                <div class="position-slider-wrapper">
-                  <span class="pos-label">Top</span>
-                  <input type="range" id="captionPosition" min="5" max="95" value="75" step="1">
-                  <span class="pos-label">Bottom</span>
+            <!-- 4. Layout Accordion -->
+            <details class="section-card collapsible-section" id="styleLayoutCard" open>
+              <summary class="section-card-header">
+                <h3><i class="fa-solid fa-arrows-to-eye"></i> Layout & Alignment</h3>
+              </summary>
+              <div class="section-card-content">
+                <div class="control-group">
+                  <label for="captionPosition">Vertical Position (Y-axis %)</label>
+                  <div class="position-slider-wrapper">
+                    <span class="pos-label">Top</span>
+                    <input type="range" id="captionPosition" min="5" max="95" value="75" step="1">
+                    <span class="pos-label">Bottom</span>
+                  </div>
                 </div>
-              </div>
-              <div class="control-row">
-                <div class="control-group flex-1">
-                  <label for="wordsPerLine">Words Per Line</label>
-                  <select id="wordsPerLine">
-                    <option value="1">1 Word (Fast Pop)</option>
-                    <option value="2" selected>2 Words (Punchy)</option>
-                    <option value="3">3 Words (Trending)</option>
-                    <option value="4">4 Words</option>
-                    <option value="999">Full Sentence / Phrase</option>
+                <div class="control-row">
+                  <div class="control-group flex-1">
+                    <label for="wordsPerLine">Words Per Line</label>
+                    <select id="wordsPerLine">
+                      <option value="1">1 Word (Fast Pop)</option>
+                      <option value="2" selected>2 Words (Punchy)</option>
+                      <option value="3">3 Words (Trending)</option>
+                      <option value="4">4 Words</option>
+                      <option value="999">Full Sentence / Phrase</option>
+                    </select>
+                  </div>
+                  <div class="control-group flex-1">
+                    <label for="textAlignment">Text Align</label>
+                    <select id="textAlignment">
+                      <option value="center" selected>Center</option>
+                      <option value="left">Left</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="control-group">
+                  <label for="activeWordAnimation">Active Word Animation</label>
+                  <select id="activeWordAnimation">
+                    <option value="scale" selected>Scale Pop (Hormozi style)</option>
+                    <option value="bounce">Jump Bounce</option>
+                    <option value="tilt">Tilt Alternating</option>
+                    <option value="glow">Neon Pulse Glow</option>
+                    <option value="none">None (Static Color)</option>
                   </select>
                 </div>
-                <div class="control-group flex-1">
-                  <label for="textAlignment">Text Align</label>
-                  <select id="textAlignment">
-                    <option value="center" selected>Center</option>
-                    <option value="left">Left</option>
-                    <option value="right">Right</option>
-                  </select>
+              </div>
+            </details>
+          </div>
+        </section>
+
+        <!-- Center Panel: Live Preview -->
+        <section class="panel center-panel glass-panel" id="desktopCenterPanel">
+          <div class="panel-header">
+            <i class="fa-solid fa-play"></i>
+            <h2>Video Preview</h2>
+            <div class="header-actions-preview" style="margin-left: auto; display: flex; gap: 8px; align-items: center;" id="bgSelectorCard">
+              <button id="btnUploadBg" class="aspect-btn" title="Upload Custom Background Video/Image"><i class="fa-solid fa-images"></i> Background Media</button>
+              <div class="bg-selector-row" style="margin-left: 8px;">
+                <button class="bg-btn active" data-bg="grid" title="Transparent Grid"><i class="fa-solid fa-border-none"></i> Grid</button>
+                <button class="bg-btn" data-bg="green" title="Chroma Key Green Screen"><span class="color-dot green-dot"></span> Green</button>
+                <button class="bg-btn" data-bg="black" title="Solid Black"><span class="color-dot black-dot"></span> Black</button>
+                <button class="bg-btn" data-bg="custom" id="btnActiveCustomBg" style="display: none;" title="Custom Background Media"><i class="fa-solid fa-images"></i> Custom</button>
+                <input type="file" id="bgFileInput" accept="video/*,image/*" class="hidden">
+              </div>
+            </div>
+          </div>
+          <div class="panel-content center-layout" id="desktopCenterContent">
+            
+            <!-- Shared Canvas Viewport (Placed in desktop by default) -->
+            <div class="canvas-viewport portrait-mode" id="canvasViewport">
+              <canvas id="previewCanvas" width="1080" height="1920"></canvas>
+              <div class="bg-media-container" id="bgMediaContainer"></div>
+              <div class="canvas-overlay clickable" id="canvasOverlay">
+                <div class="overlay-prompt" id="canvasUploadPrompt">
+                  <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
+                  <p class="main-prompt">Upload an Audio File to Start</p>
+                  <p class="sub-prompt">Drag & drop or click here to upload narration</p>
+                </div>
+                <div class="overlay-prompt hidden" id="canvasLoadingPrompt">
+                  <div class="ai-loading-spinner" style="margin-bottom: 16px;"></div>
+                  <p class="main-prompt">AI Sync Transcribing...</p>
+                  <p class="sub-prompt" id="canvasLoadingSubText">Extracting speech timestamps</p>
                 </div>
               </div>
-              <div class="control-group">
-                <label for="activeWordAnimation">Active Word Animation</label>
-                <select id="activeWordAnimation">
-                  <option value="scale" selected>Scale Pop (Hormozi style)</option>
-                  <option value="bounce">Jump Bounce</option>
-                  <option value="tilt">Tilt Alternating</option>
-                  <option value="glow">Neon Pulse Glow</option>
-                  <option value="none">None (Static Color)</option>
-                </select>
+              <!-- Play/Pause HUD overlay -->
+              <div class="hud-overlay" id="hudOverlay">
+                <div class="hud-circle">
+                  <i class="fa-solid fa-play" id="hudPlayIcon"></i>
+                  <i class="fa-solid fa-pause" id="hudPauseIcon" style="display: none;"></i>
+                </div>
               </div>
             </div>
-          </details>
-        </div>
-      </section>
 
-      <!-- Center Panel: Live Preview & Timelines -->
-      <section class="panel center-panel glass-panel">
-        <div class="panel-header">
-          <i class="fa-solid fa-play"></i>
-          <h2>Video Preview</h2>
-          <div class="header-actions-preview" style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
-            <button id="btnUploadBg" class="aspect-btn" title="Upload Custom Background Video/Image"><i class="fa-solid fa-images"></i> Custom Video</button>
-            <div class="preview-toggles">
-              <!-- Aspect Ratio Toggles -->
-              <button id="btnAspectPortrait" class="aspect-btn active" title="Vertical 9:16 (Shorts/TikTok)"><i class="fa-solid fa-mobile-screen"></i> 9:16</button>
-              <button id="btnAspectLandscape" class="aspect-btn" title="Horizontal 16:9 (YouTube)"><i class="fa-solid fa-tv"></i> 16:9</button>
-            </div>
-          </div>
-        </div>
+            <!-- Shared Player Controls Toolbar -->
+            <div class="player-toolbar" id="playerToolbarContainer">
+              <!-- Mobile Viewport Time Labels -->
+              <span class="mobile-time-label mobile-only" id="currentTimeMobile">00:00.0</span>
 
-        <div class="panel-content center-layout">
-          <!-- Canvas Preview Window -->
-          <div class="canvas-viewport portrait-mode" id="canvasViewport">
-            <!-- The actual canvas rendering the subtitles -->
-            <canvas id="previewCanvas" width="1080" height="1920"></canvas>
-            
-            <!-- Dynamic Video/Image Background container (loaded when user uploads a background) -->
-            <div class="bg-media-container" id="bgMediaContainer"></div>
-            
-            <!-- Canvas Overlay State (Upload prompt / loading) -->
-            <div class="canvas-overlay clickable" id="canvasOverlay">
-              <!-- State 1: Upload Prompt -->
-              <div class="overlay-prompt" id="canvasUploadPrompt">
-                <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
-                <p class="main-prompt">Upload an Audio File to Start</p>
-                <p class="sub-prompt">Drag & drop or click here to upload narration</p>
-              </div>
-              <!-- State 2: Transcribing / Loading -->
-              <div class="overlay-prompt hidden" id="canvasLoadingPrompt">
-                <div class="ai-loading-spinner" style="margin-bottom: 16px;"></div>
-                <p class="main-prompt">AI Sync Transcribing...</p>
-                <p class="sub-prompt" id="canvasLoadingSubText">Extracting speech timestamps</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Preview Custom Background Selector -->
-          <div class="bg-selector-row">
-            <span class="bg-label">Canvas Background:</span>
-            <button class="bg-btn active" data-bg="grid" title="Transparent Grid"><i class="fa-solid fa-border-none"></i> Transparent</button>
-            <button class="bg-btn" data-bg="green" title="Chroma Key Green Screen"><span class="color-dot green-dot"></span> Green Screen</button>
-            <button class="bg-btn" data-bg="black" title="Solid Black"><span class="color-dot black-dot"></span> Black</button>
-            <button class="bg-btn" data-bg="custom" id="btnActiveCustomBg" style="display: none;" title="Custom Background Media"><i class="fa-solid fa-images"></i> Custom Media</button>
-            <input type="file" id="bgFileInput" accept="video/*,image/*" class="hidden">
-          </div>
-
-          <!-- Wavesurfer Waveform Visualizer -->
-          <div class="waveform-container">
-            <div class="waveform-labels">
-              <span><i class="fa-solid fa-waveform"></i> Audio Waveform</span>
-              <span id="currentTimeDisplay">00:00.0 / 00:00.0</span>
-            </div>
-            <div id="audioWaveform"></div>
-          </div>
-
-          <!-- Playback Controls -->
-          <div class="playback-controls">
-            <div class="control-row">
-              <button id="btnPlayPause" class="action-btn play-btn" disabled><i class="fa-solid fa-play"></i> Play</button>
-              <button id="btnStop" class="action-btn" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+              <button id="btnPlayPause" class="toolbar-btn play-btn" disabled title="Play/Pause"><i class="fa-solid fa-play"></i></button>
+              <button id="btnStop" class="toolbar-btn desktop-only" disabled title="Stop Playback"><i class="fa-solid fa-stop"></i></button>
               
-              <div class="volume-control">
-                <i class="fa-solid fa-volume-high" id="volumeIcon"></i>
-                <input type="range" id="playbackVolume" min="0" max="1" step="0.05" value="0.8">
+              <div class="toolbar-divider desktop-only"></div>
+              
+              <div class="aspect-toggles desktop-only">
+                <button id="btnAspectPortrait" class="toolbar-btn active" title="Portrait 9:16 (TikTok/Shorts)"><i class="fa-solid fa-mobile-screen"></i> 9:16</button>
+                <button id="btnAspectLandscape" class="toolbar-btn" title="Landscape 16:9 (YouTube)"><i class="fa-solid fa-tv"></i> 16:9</button>
               </div>
 
-              <div class="playback-speed-wrapper">
+              <div class="toolbar-divider desktop-only"></div>
+
+              <div class="volume-control-wrapper desktop-only">
+                <button id="volumeBtn" class="toolbar-btn" disabled><i class="fa-solid fa-volume-high" id="volumeIcon"></i></button>
+                <input type="range" id="playbackVolume" min="0" max="1" step="0.05" value="0.8" class="toolbar-slider">
+              </div>
+
+              <div class="toolbar-divider desktop-only"></div>
+
+              <div class="speed-control-wrapper desktop-only">
                 <label for="playbackSpeed">Speed:</label>
-                <select id="playbackSpeed">
+                <select id="playbackSpeed" class="toolbar-select">
                   <option value="0.5">0.5x</option>
                   <option value="0.75">0.75x</option>
                   <option value="1.0" selected>1.0x</option>
@@ -385,145 +410,219 @@
                   <option value="1.5">1.5x</option>
                 </select>
               </div>
-            </div>
-          </div>
 
-          <!-- Video Exporter Row -->
-          <div class="export-section">
-            <div class="export-header">
-              <h3><i class="fa-solid fa-video"></i> Render & Export Video Captions</h3>
+              <span class="mobile-time-label mobile-only" id="durationTimeMobile">00:00.0</span>
             </div>
-            <div class="export-options-grid">
-              <div class="control-group">
-                <label for="exportFormat">Export Format</label>
-                <select id="exportFormat">
-                  <option value="webm-transparent" selected>WebM Video (Transparent Background - High Quality)</option>
-                  <option value="webm-green">WebM Video (Green Screen)</option>
-                  <option value="mp4-green">MP4 Video (Green Screen - Universal Compatibility)</option>
-                </select>
-              </div>
-              <div class="control-group">
-                <label for="exportAudio">Audio Track</label>
-                <select id="exportAudio">
-                  <option value="include" selected>Include Narrator Audio</option>
-                  <option value="silent">Muted (Subtitles Only)</option>
-                </select>
-              </div>
-            </div>
-            <div class="export-actions">
-              <button id="btnExportVideo" class="btn-primary" disabled><i class="fa-solid fa-circle-arrow-down"></i> Render Subtitles Video</button>
-              <button id="btnExportSRT" class="btn-secondary" disabled><i class="fa-solid fa-file-lines"></i> Export .SRT Subtitles</button>
-            </div>
-            <!-- Export Progress Dialog -->
-            <div class="export-progress-bar hidden" id="exportProgressContainer">
-              <div class="progress-details">
-                <span id="exportProgressLabel">Rendering Frame: 0/0</span>
-                <span id="exportProgressPercentage">0%</span>
-              </div>
-              <div class="progress-track">
-                <div class="progress-fill" id="exportProgressFill" style="width: 0%"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      <!-- Right Panel: Audio Sync & Transcription -->
-      <section class="panel right-panel glass-panel">
-        <div class="panel-header">
-          <i class="fa-solid fa-gears"></i>
-          <h2>Sync Engine</h2>
-        </div>
-        <div class="panel-content scrollable">
-          <!-- Auto Sync Engine (Moved to the Top for UX) -->
-          <div class="section-card sync-method-card">
-            <h3><i class="fa-solid fa-circle-nodes"></i> Auto Sync Engine</h3>
+            <!-- Waveform Container Desktop -->
+            <div class="waveform-container" id="desktopWaveformContainerParent">
+              <div class="waveform-labels">
+                <span><i class="fa-solid fa-waveform"></i> Audio Waveform</span>
+                <span id="currentTimeDisplay">00:00.0 / 00:00.0</span>
+              </div>
+              <div id="desktopWaveformContainer">
+                <!-- Shared Audio Waveform Div (Placed here by default) -->
+                <div id="audioWaveform"></div>
+              </div>
+            </div>
+
+            <!-- Desktop Exporter Section -->
+            <div class="export-section" id="exportSectionDesktop">
+              <div class="export-header">
+                <h3><i class="fa-solid fa-video"></i> Render & Export Video Captions</h3>
+              </div>
+              <div class="export-options-grid">
+                <div class="control-group">
+                  <label for="exportFormat">Export Format</label>
+                  <select id="exportFormat">
+                    <option value="webm-transparent" selected>WebM Video (Transparent Background - High Quality)</option>
+                    <option value="webm-green">WebM Video (Green Screen)</option>
+                    <option value="mp4-green">MP4 Video (Green Screen - Universal Compatibility)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="exportAudio">Audio Track</label>
+                  <select id="exportAudio">
+                    <option value="include" selected>Include Narrator Audio</option>
+                    <option value="silent">Muted (Subtitles Only)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="export-actions">
+                <button id="btnExportVideo" class="btn-primary" disabled><i class="fa-solid fa-circle-arrow-down"></i> Render Subtitles Video</button>
+                <button id="btnExportSRT" class="btn-secondary" disabled><i class="fa-solid fa-file-lines"></i> Export .SRT Subtitles</button>
+              </div>
+              <!-- Export Progress Bar -->
+              <div id="exportProgressContainer" class="hidden render-status-card">
+                <div class="progress-details">
+                  <span id="exportProgressLabel">Rendering Frame: 0/0</span>
+                  <span id="exportProgressPercentage">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill" id="exportProgressFill" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- Right Panel: Sync Engine & Transcription -->
+        <section class="panel right-panel glass-panel" id="desktopRightPanel">
+          <div class="panel-header">
+            <i class="fa-solid fa-gears"></i>
+            <h2>Sync Engine</h2>
+          </div>
+          <div class="panel-content scrollable" id="desktopRightContent">
             
-            <div class="sync-actions-stack">
-              <!-- AI Auto Sync -->
-              <button id="btnRunAISync" class="sync-btn primary-sync" disabled>
-                <div class="sync-icon"><i class="fa-solid fa-brain"></i></div>
+            <!-- 1. Paste Script Card -->
+            <div class="section-card" id="pastedTextCard">
+              <h3><i class="fa-solid fa-file-signature"></i> Paste Script Text</h3>
+              <textarea id="pastedText" placeholder="Paste your AI voiceover narration text here (optional, but highly recommended for 100% correct spelling!). The AI will align this text, or you can use the Tap-to-Sync game."></textarea>
+              <div style="margin-top: 10px;">
+                <label class="custom-checkbox" title="Forces subtitles to match this text spelling by aligning Whisper timestamps.">
+                  <input type="checkbox" id="chkAlignPastedText">
+                  <span class="checkmark"></span>
+                  Align subtitles to pasted text (forces exact spelling)
+                </label>
+              </div>
+            </div>
+
+            <!-- 2. Kokoro TTS Card -->
+            <div class="section-card tts-card" id="ttsCard">
+              <h3><i class="fa-solid fa-microphone-lines"></i> AI Voice Generator <span class="tts-badge">Kokoro AI</span></h3>
+              <p class="tts-hint">Generate local voiceover narration from the script text above. The model runs locally in your browser.</p>
+              <div class="tts-controls-grid">
+                <div class="control-group">
+                  <label for="ttsVoice">Voice</label>
+                  <select id="ttsVoice">
+                    <optgroup label="🇺🇸 American Female">
+                      <option value="af_heart" selected>Heart (Warm)</option>
+                      <option value="af_sky">Sky (Clear)</option>
+                      <option value="af_bella">Bella (Soft)</option>
+                      <option value="af_sarah">Sarah (Neutral)</option>
+                      <option value="af_nicole">Nicole (Rich)</option>
+                      <option value="af_nova">Nova (Bright)</option>
+                    </optgroup>
+                    <optgroup label="🇺🇸 American Male">
+                      <option value="am_adam">Adam (Deep)</option>
+                      <option value="am_michael">Michael (Smooth)</option>
+                    </optgroup>
+                    <optgroup label="🇬🇧 British Female">
+                      <option value="bf_emma">Emma (Refined)</option>
+                      <option value="bf_isabella">Isabella (Elegant)</option>
+                    </optgroup>
+                    <optgroup label="🇬🇧 British Male">
+                      <option value="bm_george">George (Authoritative)</option>
+                      <option value="bm_lewis">Lewis (Conversational)</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <!-- Hidden inputs to preserve JS compatibility -->
+                <input type="hidden" id="ttsSpeed" value="1.0">
+                <input type="hidden" id="ttsPitch" value="1.0">
+                <span id="ttsSpeedVal" class="hidden">1.0x</span>
+                <span id="ttsPitchVal" class="hidden">1.0x</span>
+              </div>
+              <button id="btnGenerateTTS" class="sync-btn primary-sync tts-generate-btn">
+                <div class="sync-icon"><i class="fa-solid fa-microphone-lines"></i></div>
                 <div class="sync-info">
-                  <span class="sync-title">Run Auto-AI Sync</span>
-                  <span class="sync-desc">In-browser Whisper AI auto-transcribes and syncs</span>
+                  <span class="sync-title">Generate AI Voiceover</span>
+                  <span class="sync-desc">Create narration from script text using Kokoro AI</span>
                 </div>
               </button>
-            </div>
-
-            <!-- Model Download progress (Local Whisper) -->
-            <div id="modelDownloadProgress" class="hidden download-progress-card">
-              <div class="progress-details">
-                <span>Downloading Local AI Model (~75MB, cached)...</span>
-                <span id="modelProgressPercent">0%</span>
+              <!-- Kokoro Download Progress -->
+              <div id="ttsDownloadProgress" class="hidden download-progress-card">
+                <div class="progress-details">
+                  <span>Downloading Kokoro AI Voice Model...</span>
+                  <span id="ttsProgressPercent">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill" id="ttsProgressFill" style="width: 0%"></div>
+                </div>
+                <p class="model-hint">First run download (WebGPU ~330MB, WASM ~82MB). Caches for offline use.</p>
               </div>
-              <div class="progress-track">
-                <div class="progress-fill" id="modelProgressFill" style="width: 0%"></div>
-              </div>
-              <p class="model-hint">Only happens on the first run. The model caches locally in your browser for offline use.</p>
-            </div>
-            
-            <!-- AI Sync Active status logger -->
-            <div id="aiLogBox" class="hidden ai-log-box">
-              <div class="log-header">AI Synchronization Logs:</div>
-              <div class="log-lines" id="aiLogLines">
-                <div>Waiting...</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Narration Audio File Details -->
-          <div class="section-card" id="audioDetailsCard">
-            <h3><i class="fa-solid fa-file-audio"></i> Narration Audio File</h3>
-            <input type="file" id="audioFileInput" accept="audio/*" class="hidden">
-            <div id="audioFileDetails" class="hidden file-details-box">
-              <span class="file-name" id="selectedFileName">audio.mp3</span>
-              <span class="file-size" id="selectedFileSize">0.0 MB</span>
-              <button id="btnRemoveAudio" class="remove-btn" title="Remove File"><i class="fa-solid fa-times"></i></button>
-            </div>
-            <p id="audioFileHint" class="transcript-hint" style="margin: 0; text-align: center;">No audio file uploaded yet. Upload via the video preview container above.</p>
-          </div>
-
-          <!-- Paste Script Text -->
-          <div class="section-card">
-            <h3><i class="fa-solid fa-file-signature"></i> Paste Script Text</h3>
-            <textarea id="pastedText" placeholder="Paste your AI voiceover narration text here (optional, but highly recommended for 100% correct spelling!). The AI will align this text, or you can use the Tap-to-Sync game."></textarea>
-          </div>
-
-          <!-- Tap to Sync Interactive Overlay Panel (Shows when tap syncing is active) -->
-          <div class="tap-sync-overlay hidden" id="tapSyncPanel">
-            <div class="tap-sync-header">
-              <h3><i class="fa-solid fa-keyboard"></i> Tap-to-Sync Studio</h3>
-              <button id="btnCloseTapSync" class="close-tap-btn"><i class="fa-solid fa-times"></i> Close</button>
-            </div>
-            <p class="tap-help-text">Press the <strong>SPACEBAR</strong> or tap the big button below as you hear each word to set its timestamp in real time!</p>
-            
-            <div class="tap-words-preview">
-              <div class="word-bubble-container" id="tapWordBubbleContainer">
-                <!-- Word bubbles will be generated here -->
+              <!-- TTS Log status -->
+              <div id="ttsStatus" class="hidden ai-log-box tts-status-box">
+                <div class="log-header">Voice Generation Status:</div>
+                <div class="log-lines" id="ttsLogLines">
+                  <div>Waiting...</div>
+                </div>
               </div>
             </div>
 
-            <div class="tap-active-dashboard">
-              <div class="tap-counters">
-                <span class="words-counter">Word: <strong id="tapWordIndex">0</strong> / <span id="tapTotalWords">0</span></span>
-                <span class="tap-current-word" id="tapCurrentWord">PRESS PLAY TO START</span>
+            <!-- 3. Whisper Auto Sync -->
+            <div class="section-card sync-method-card" id="syncEngineCard">
+              <h3><i class="fa-solid fa-circle-nodes"></i> Auto Sync Engine</h3>
+              <div class="sync-actions-stack">
+                <button id="btnRunAISync" class="sync-btn primary-sync" disabled>
+                  <div class="sync-icon"><i class="fa-solid fa-brain"></i></div>
+                  <div class="sync-info">
+                    <span class="sync-title">Run Auto-AI Sync</span>
+                    <span class="sync-desc">In-browser Whisper AI auto-transcribes and syncs</span>
+                  </div>
+                </button>
               </div>
-              <button id="btnTapAction" class="huge-tap-button" disabled>
-                <i class="fa-solid fa-hand-pointer"></i> TAP ON WORD (SPACEBAR)
-              </button>
-              <div class="tap-playback-controls">
-                <button id="btnTapPlayPause" class="action-btn"><i class="fa-solid fa-play"></i> Play & Sync</button>
-                <button id="btnTapReset" class="action-btn"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+              <!-- Whisper Download Progress -->
+              <div id="modelDownloadProgress" class="hidden download-progress-card">
+                <div class="progress-details">
+                  <span>Downloading Local AI Model (~75MB, cached)...</span>
+                  <span id="modelProgressPercent">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill" id="modelProgressFill" style="width: 0%"></div>
+                </div>
+                <p class="model-hint">Only happens on the first run. The model caches locally in your browser for offline use.</p>
+              </div>
+              <!-- AI Sync Logs -->
+              <div id="aiLogBox" class="hidden ai-log-box">
+                <div class="log-header">AI Synchronization Logs:</div>
+                <div class="log-lines" id="aiLogLines">
+                  <div>Waiting...</div>
+                </div>
               </div>
             </div>
-          </div>
 
-          <!-- Subtitle Word Editor / Transcript Grid -->
-          <details class="section-card transcript-editor-card collapsible-section" id="timelineDetails" open>
-            <summary class="transcript-editor-header">
-              <h3><i class="fa-solid fa-list-check"></i> Subtitle Editor & Timeline</h3>
-            </summary>
-            <div class="section-card-content">
+            <!-- 4. Audio File Details -->
+            <div class="section-card" id="audioDetailsCard">
+              <h3><i class="fa-solid fa-file-audio"></i> Narration Audio File</h3>
+              <input type="file" id="audioFileInput" accept="audio/*" class="hidden">
+              <div id="audioFileDetails" class="hidden file-details-box">
+                <span class="file-name" id="selectedFileName">audio.mp3</span>
+                <span class="file-size" id="selectedFileSize">0.0 MB</span>
+                <button id="btnRemoveAudio" class="remove-btn" title="Remove File"><i class="fa-solid fa-times"></i></button>
+              </div>
+              <p id="audioFileHint" class="transcript-hint" style="margin: 0; text-align: center;">No audio file uploaded yet. Upload via the video preview container or drag & drop here.</p>
+            </div>
+
+            <!-- 5. Tap to Sync Overlay Panel -->
+            <div class="tap-sync-overlay hidden" id="tapSyncPanel">
+              <div class="tap-sync-header">
+                <h3><i class="fa-solid fa-keyboard"></i> Tap-to-Sync Studio</h3>
+                <button id="btnCloseTapSync" class="close-tap-btn"><i class="fa-solid fa-times"></i> Close</button>
+              </div>
+              <p class="tap-help-text">Press the <strong>SPACEBAR</strong> or tap the big button below as you hear each word to set timings!</p>
+              <div class="tap-words-preview">
+                <div class="word-bubble-container" id="tapWordBubbleContainer"></div>
+              </div>
+              <div class="tap-active-dashboard">
+                <div class="tap-counters">
+                  <span class="words-counter">Word: <strong id="tapWordIndex">0</strong> / <span id="tapTotalWords">0</span></span>
+                  <span class="tap-current-word" id="tapCurrentWord">PRESS PLAY TO START</span>
+                </div>
+                <button id="btnTapAction" class="huge-tap-button" disabled>
+                  <i class="fa-solid fa-hand-pointer"></i> TAP ON WORD (SPACEBAR)
+                </button>
+                <div class="tap-playback-controls">
+                  <button id="btnTapPlayPause" class="action-btn"><i class="fa-solid fa-play"></i> Play & Sync</button>
+                  <button id="btnTapReset" class="action-btn"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 6. Subtitle list Editor Card -->
+            <div class="section-card transcript-editor-card" id="transcriptEditorCard">
+              <h3><i class="fa-solid fa-list-check"></i> Subtitle Editor List</h3>
               <div class="transcript-actions" style="margin-bottom: 8px; justify-content: flex-end; display: flex; gap: 8px;">
                 <button id="btnAddWord" class="small-icon-btn" title="Add Word" disabled><i class="fa-solid fa-plus"></i></button>
                 <button id="btnClearAllWords" class="small-icon-btn" title="Clear Transcript" disabled><i class="fa-solid fa-trash"></i></button>
@@ -534,13 +633,115 @@
                 <div class="empty-transcript-placeholder">
                   <i class="fa-solid fa-quote-left"></i>
                   <p>No synced subtitles yet.</p>
-                  <p>Run the AI Sync or use the Tap-to-Sync studio above to generate synchronized captions.</p>
+                  <p>Generate audio or run sync to view transcripts.</p>
                 </div>
               </div>
             </div>
-          </details>
+
+          </div>
+        </section>
+      </div>
+
+      <!-- MOBILE LAYOUT -->
+      <div class="mobile-layout hidden" id="mobileLayout">
+        <aside class="sidebar-container glass-panel">
+          <!-- Icon Tab Menu -->
+          <nav class="sidebar-tabs">
+            <button class="tab-btn active" data-tab="media" title="Upload Media & Backgrounds">
+              <i class="fa-solid fa-folder-open"></i>
+              <span>Media</span>
+            </button>
+            <button class="tab-btn" data-tab="voice" title="Voiceover & Sync Engine">
+              <i class="fa-solid fa-microphone-lines"></i>
+              <span>Voice & Sync</span>
+            </button>
+            <button class="tab-btn" data-tab="style" title="Customize Caption Styles">
+              <i class="fa-solid fa-palette"></i>
+              <span>Style</span>
+            </button>
+            <button class="tab-btn" data-tab="editor" title="Subtitle Word List">
+              <i class="fa-solid fa-list-check"></i>
+              <span>Editor</span>
+            </button>
+          </nav>
+          
+          <!-- Tab Panels Container -->
+          <div class="sidebar-panels" id="sidebarPanels">
+            <button class="drawer-close-btn" id="btnCloseDrawer" title="Close Panel"><i class="fa-solid fa-xmark"></i></button>
+            <div class="tab-panel active" id="panel-media">
+              <!-- Media cards will be moved here dynamically on mobile -->
+            </div>
+            <div class="tab-panel" id="panel-voice">
+              <!-- Voice cards will be moved here dynamically on mobile -->
+            </div>
+            <div class="tab-panel" id="panel-style">
+              <!-- Style cards will be moved here dynamically on mobile -->
+            </div>
+            <div class="tab-panel" id="panel-editor">
+              <!-- Editor list cards will be moved here dynamically on mobile -->
+            </div>
+          </div>
+        </aside>
+
+        <!-- Mobile Main Stage -->
+        <div class="main-stage">
+          <section class="preview-section glass-panel" id="mobilePreviewSection">
+            <!-- Canvas viewport & player controls will be moved here dynamically on mobile -->
+          </section>
+          
+          <section class="timeline-section glass-panel" id="mobileTimelineSection">
+            <div class="timeline-container">
+              <div class="timeline-header-bar">
+                <div class="timeline-title-area">
+                  <i class="fa-solid fa-clock"></i>
+                  <span>Timeline Editor</span>
+                </div>
+                <div class="timeline-time-display" id="currentTimeDisplayMobile">
+                  00:00.0 / 00:00.0
+                </div>
+              </div>
+              
+              <div class="timeline-viewport" id="timelineViewport">
+                <!-- Playhead Fixed Center Line -->
+                <div class="timeline-playhead-line" id="timelinePlayhead"></div>
+                <!-- Timeline Scrollable Tracks -->
+                <div class="timeline-scroll-container" id="timelineScrollContainer">
+                  <div class="timeline-tracks-width-wrapper" id="timelineTracksWidthWrapper">
+                    <!-- Track 0: Time Ruler Track -->
+                    <div class="timeline-track-row ruler-track">
+                      <div class="track-body" id="timelineRulerTrackBody">
+                        <canvas id="timelineRulerCanvas" height="24"></canvas>
+                      </div>
+                    </div>
+
+                    <!-- Track 1: Audio Waveform -->
+                    <div class="timeline-track-row audio-track">
+                      <div class="track-info">
+                        <i class="fa-solid fa-waveform"></i>
+                        <span>Wave</span>
+                      </div>
+                      <div class="track-body" id="mobileWaveformTrackBody">
+                        <!-- #audioWaveform will be moved here dynamically on mobile -->
+                      </div>
+                    </div>
+                    <!-- Track 2: Subtitle Word timings -->
+                    <div class="timeline-track-row subtitles-track">
+                      <div class="track-info">
+                        <i class="fa-solid fa-closed-captioning"></i>
+                        <span>Text</span>
+                      </div>
+                      <div class="track-body" id="timelineSubtitleTrack">
+                        <div class="timeline-no-data-msg">Upload audio file to view caption timeline</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-      </section>
+      </div>
+
     </main>
 
     <!-- Footer Status Bar -->

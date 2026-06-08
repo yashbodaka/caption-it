@@ -52,11 +52,11 @@ const state = {
     isSyncing: false
   },
   
-  // API Keys (Stored in localStorage)
+  // AI provider state
   api: {
-    provider: 'local', // 'local', 'gemini', 'openai'
-    geminiKey: localStorage.getItem('capflow_gemini_key') || '',
-    openaiKey: localStorage.getItem('capflow_openai_key') || ''
+    provider: 'local',
+    geminiKey: '',
+    openaiKey: ''
   },
   
   // Exporter state
@@ -67,7 +67,13 @@ const state = {
   aiModelReady: false,
   pendingTranscription: false,
   workerFailed: false,
-  rawWhisperChunks: null
+  rawWhisperChunks: null,
+  
+  // TTS (Kokoro) state
+  tts: {
+    modelReady: false,
+    isGenerating: false
+  }
 };
 
 // --- DOM Elements ---
@@ -75,16 +81,6 @@ const el = {
   // Config / Indicators
   statusDot: document.querySelector('#aiStatusIndicator .status-dot'),
   statusText: document.getElementById('statusText'),
-  btnSettings: document.getElementById('btnSettings'),
-  settingsModal: document.getElementById('settingsModal'),
-  apiProvider: document.getElementById('apiProvider'),
-  geminiSettings: document.getElementById('geminiSettings'),
-  openaiSettings: document.getElementById('openaiSettings'),
-  geminiApiKey: document.getElementById('geminiApiKey'),
-  openaiApiKey: document.getElementById('openaiApiKey'),
-  btnSaveSettings: document.getElementById('btnSaveSettings'),
-  btnCancelSettings: document.getElementById('btnCancelSettings'),
-  btnModalClose: document.getElementById('btnModalClose'),
 
   // Background Customization
   btnAspectPortrait: document.getElementById('btnAspectPortrait'),
@@ -128,6 +124,8 @@ const el = {
 
   // Playback Timeline
   currentTimeDisplay: document.getElementById('currentTimeDisplay'),
+  currentTimeMobile: document.getElementById('currentTimeMobile'),
+  durationTimeMobile: document.getElementById('durationTimeMobile'),
   btnPlayPause: document.getElementById('btnPlayPause'),
   btnStop: document.getElementById('btnStop'),
   playbackVolume: document.getElementById('playbackVolume'),
@@ -142,6 +140,7 @@ const el = {
   selectedFileSize: document.getElementById('selectedFileSize'),
   btnRemoveAudio: document.getElementById('btnRemoveAudio'),
   pastedText: document.getElementById('pastedText'),
+  chkAlignPastedText: document.getElementById('chkAlignPastedText'),
   btnRunAISync: document.getElementById('btnRunAISync'),
   modelDownloadProgress: document.getElementById('modelDownloadProgress'),
   modelProgressPercent: document.getElementById('modelProgressPercent'),
@@ -166,24 +165,89 @@ const el = {
   btnClearAllWords: document.getElementById('btnClearAllWords'),
 
   // Video Exporter
-  exportFormat: document.getElementById('exportFormat'),
-  exportAudio: document.getElementById('exportAudio'),
+  exportFormat: document.getElementById('exportFormat') || { value: 'webm-transparent' },
+  exportAudio: document.getElementById('exportAudio') || { value: 'include' },
   btnExportVideo: document.getElementById('btnExportVideo'),
   btnExportSRT: document.getElementById('btnExportSRT'),
+  btnExportVideoMobile: document.getElementById('btnExportVideoMobile'),
+  btnExportSRTMobile: document.getElementById('btnExportSRTMobile'),
+  btnExportToggle: document.getElementById('btnExportToggle'),
+  exportDropdownMenu: document.getElementById('exportDropdownMenu'),
   exportProgressContainer: document.getElementById('exportProgressContainer'),
   exportProgressLabel: document.getElementById('exportProgressLabel'),
   exportProgressPercentage: document.getElementById('exportProgressPercentage'),
-  exportProgressFill: document.getElementById('exportProgressFill')
+  exportProgressFill: document.getElementById('exportProgressFill'),
+
+  // Config / Modals / Indicators
+  btnSettings: document.getElementById('btnSettings'),
+  settingsModal: document.getElementById('settingsModal'),
+  apiProvider: document.getElementById('apiProvider'),
+  geminiSettings: document.getElementById('geminiSettings'),
+  openaiSettings: document.getElementById('openaiSettings'),
+  geminiApiKey: document.getElementById('geminiApiKey'),
+  openaiApiKey: document.getElementById('openaiApiKey'),
+  btnSaveSettings: document.getElementById('btnSaveSettings'),
+  btnCancelSettings: document.getElementById('btnCancelSettings'),
+  btnModalClose: document.getElementById('btnModalClose'),
+
+  // Canvas HUD overlay
+  hudOverlay: document.getElementById('hudOverlay'),
+  hudPlayIcon: document.getElementById('hudPlayIcon'),
+  hudPauseIcon: document.getElementById('hudPauseIcon'),
+
+  // Timeline components
+  timelineScrollContainer: document.getElementById('timelineScrollContainer'),
+  timelineSubtitleTrack: document.getElementById('timelineSubtitleTrack'),
+  timelineTracksWidthWrapper: document.getElementById('timelineTracksWidthWrapper'),
+
+  // TTS (Kokoro) Controls
+  ttsVoice: document.getElementById('ttsVoice'),
+  ttsSpeed: document.getElementById('ttsSpeed'),
+  ttsPitch: document.getElementById('ttsPitch'),
+  ttsSpeedVal: document.getElementById('ttsSpeedVal'),
+  ttsPitchVal: document.getElementById('ttsPitchVal'),
+  btnGenerateTTS: document.getElementById('btnGenerateTTS'),
+  ttsDownloadProgress: document.getElementById('ttsDownloadProgress'),
+  ttsProgressPercent: document.getElementById('ttsProgressPercent'),
+  ttsProgressFill: document.getElementById('ttsProgressFill'),
+  ttsStatus: document.getElementById('ttsStatus'),
+  ttsLogLines: document.getElementById('ttsLogLines')
 };
 
 // Canvas rendering context
 const ctx = el.previewCanvas.getContext('2d');
 
+// Timeline Zoom Scale (pixels per second)
+const PIXELS_PER_SECOND = 150;
+
+// Mock WaveSurfer fallback to prevent script failures if CDN is offline or blocked
+const wavesurferMock = {
+  isMock: true,
+  on: () => {},
+  once: () => {},
+  un: () => {},
+  destroy: () => {},
+  load: () => {},
+  play: () => {},
+  pause: () => {},
+  stop: () => {},
+  setTime: () => {},
+  getCurrentTime: () => 0,
+  getDuration: () => 0,
+  setVolume: () => {},
+  setPlaybackRate: () => {},
+  isPlaying: () => false,
+  zoom: () => {}
+};
+
 // WaveSurfer Instance
-let wavesurfer = null;
+let wavesurfer = wavesurferMock;
 
 // Background Web Worker for Local AI
 let aiWorker = null;
+
+// Background Web Worker for TTS (Kokoro)
+let ttsWorker = null;
 
 // Styling Presets Dictionary
 const PRESETS = {
@@ -271,6 +335,7 @@ function init() {
   loadApiConfig();
   setupWaveSurfer();
   initWorker();
+  initResponsiveLayout();
   
   // Render default canvas
   drawCanvas(0);
@@ -292,20 +357,132 @@ function init() {
   window.addEventListener('resize', handleResponsiveCollapse);
 }
 
+// --- Responsive Layout Handler (Moves DOM cards between Desktop 3-columns and Mobile InShot Tab panels) ---
+function initResponsiveLayout() {
+  const handleLayoutSwitch = () => {
+    const isDesktop = window.innerWidth >= 992;
+    const desktopLayout = document.getElementById('desktopLayout');
+    const mobileLayout = document.getElementById('mobileLayout');
+    
+    if (!desktopLayout || !mobileLayout) return;
+    
+    if (isDesktop) {
+      desktopLayout.classList.remove('hidden');
+      mobileLayout.classList.add('hidden');
+      
+      // Move style cards to desktop left panel content
+      const leftContent = document.getElementById('desktopLeftContent');
+      if (leftContent) {
+        leftContent.appendChild(document.getElementById('stylePresetsCard'));
+        leftContent.appendChild(document.getElementById('styleTypographyCard'));
+        leftContent.appendChild(document.getElementById('styleColorsCard'));
+        leftContent.appendChild(document.getElementById('styleLayoutCard'));
+      }
+      
+      // Move preview stage elements to desktop center content
+      const centerContent = document.getElementById('desktopCenterContent');
+      if (centerContent) {
+        centerContent.appendChild(document.getElementById('canvasViewport'));
+        centerContent.appendChild(document.getElementById('playerToolbarContainer'));
+        centerContent.appendChild(document.getElementById('desktopWaveformContainerParent'));
+        centerContent.appendChild(document.getElementById('exportSectionDesktop'));
+      }
+      
+      // Move sync cards and editor cards to desktop right content
+      const rightContent = document.getElementById('desktopRightContent');
+      if (rightContent) {
+        rightContent.appendChild(document.getElementById('pastedTextCard'));
+        rightContent.appendChild(document.getElementById('ttsCard'));
+        rightContent.appendChild(document.getElementById('syncEngineCard'));
+        rightContent.appendChild(document.getElementById('audioDetailsCard'));
+        rightContent.appendChild(document.getElementById('tapSyncPanel'));
+        rightContent.appendChild(document.getElementById('transcriptEditorCard'));
+      }
+      
+      // Ensure WaveSurfer container is desktop
+      const desktopWaveform = document.getElementById('desktopWaveformContainer');
+      const audioWaveform = document.getElementById('audioWaveform');
+      if (desktopWaveform && audioWaveform) {
+        desktopWaveform.appendChild(audioWaveform);
+      }
+      
+      if (wavesurfer && typeof wavesurfer.zoom === 'function') {
+        // Flat waveform view on desktop (no horizontal scroll zoom)
+        wavesurfer.zoom(0);
+      }
+    } else {
+      desktopLayout.classList.add('hidden');
+      mobileLayout.classList.remove('hidden');
+      
+      // Move cards to mobile tab panels
+      const panelMedia = document.getElementById('panel-media');
+      if (panelMedia) {
+        panelMedia.appendChild(document.getElementById('audioDetailsCard'));
+        panelMedia.appendChild(document.getElementById('bgSelectorCard'));
+      }
+      
+      const panelVoice = document.getElementById('panel-voice');
+      if (panelVoice) {
+        panelVoice.appendChild(document.getElementById('pastedTextCard'));
+        panelVoice.appendChild(document.getElementById('ttsCard'));
+        panelVoice.appendChild(document.getElementById('syncEngineCard'));
+        panelVoice.appendChild(document.getElementById('tapSyncPanel'));
+      }
+      
+      const panelStyle = document.getElementById('panel-style');
+      if (panelStyle) {
+        panelStyle.appendChild(document.getElementById('stylePresetsCard'));
+        panelStyle.appendChild(document.getElementById('styleTypographyCard'));
+        panelStyle.appendChild(document.getElementById('styleColorsCard'));
+        panelStyle.appendChild(document.getElementById('styleLayoutCard'));
+      }
+      
+      const panelEditor = document.getElementById('panel-editor');
+      if (panelEditor) {
+        panelEditor.appendChild(document.getElementById('transcriptEditorCard'));
+      }
+      
+      // Move preview stage to mobile stage
+      const mobilePreview = document.getElementById('mobilePreviewSection');
+      if (mobilePreview) {
+        mobilePreview.appendChild(document.getElementById('canvasViewport'));
+        mobilePreview.appendChild(document.getElementById('playerToolbarContainer'));
+      }
+      
+      // Move waveform container to mobile timeline track body
+      const mobileWaveformTrack = document.getElementById('mobileWaveformTrackBody');
+      const audioWaveform = document.getElementById('audioWaveform');
+      if (mobileWaveformTrack && audioWaveform) {
+        mobileWaveformTrack.appendChild(audioWaveform);
+      }
+      
+      if (wavesurfer && typeof wavesurfer.zoom === 'function') {
+        // Zoom WaveSurfer track on mobile timeline
+        wavesurfer.zoom(PIXELS_PER_SECOND);
+      }
+    }
+  };
+  
+  window.addEventListener('resize', handleLayoutSwitch);
+  handleLayoutSwitch();
+}
+
 // --- Event Listeners setup ---
 function setupEventListeners() {
   // Settings & Modals
-  el.btnSettings.addEventListener('click', () => {
-    el.geminiApiKey.value = state.api.geminiKey;
-    el.openaiApiKey.value = state.api.openaiKey;
-    el.apiProvider.value = state.api.provider;
-    updateApiFieldsVisibility();
-    el.settingsModal.classList.remove('hidden');
-  });
+  if (el.btnSettings) {
+    el.btnSettings.addEventListener('click', () => {
+      el.geminiApiKey.value = state.api.geminiKey || '';
+      el.openaiApiKey.value = state.api.openaiKey || '';
+      el.apiProvider.value = state.api.provider || 'local';
+      updateApiFieldsVisibility();
+      el.settingsModal.classList.remove('hidden');
+    });
+  }
 
-  el.apiProvider.addEventListener('change', updateApiFieldsVisibility);
+  el.apiProvider?.addEventListener('change', updateApiFieldsVisibility);
 
-  el.btnSaveSettings.addEventListener('click', () => {
+  el.btnSaveSettings?.addEventListener('click', () => {
     state.api.provider = el.apiProvider.value;
     state.api.geminiKey = el.geminiApiKey.value.trim();
     state.api.openaiKey = el.openaiApiKey.value.trim();
@@ -318,11 +495,11 @@ function setupEventListeners() {
     updateStatusIndicator();
   });
 
-  el.btnCancelSettings.addEventListener('click', () => {
+  el.btnCancelSettings?.addEventListener('click', () => {
     el.settingsModal.classList.add('hidden');
   });
 
-  el.btnModalClose.addEventListener('click', () => {
+  el.btnModalClose?.addEventListener('click', () => {
     el.settingsModal.classList.add('hidden');
   });
 
@@ -339,6 +516,7 @@ function setupEventListeners() {
       }
     });
   });
+
 
   // Aspect Ratios
   el.btnAspectPortrait.addEventListener('click', () => {
@@ -495,7 +673,7 @@ function setupEventListeners() {
 
   el.playbackSpeed.addEventListener('change', (e) => {
     if (wavesurfer) {
-      wavesurfer.setSpeed(parseFloat(e.target.value));
+      wavesurfer.setPlaybackRate(parseFloat(e.target.value));
     }
   });
 
@@ -522,38 +700,164 @@ function setupEventListeners() {
     }
   });
 
+  el.chkAlignPastedText.addEventListener('change', () => {
+    if (state.rawWhisperChunks) {
+      realignCaptions();
+    }
+  });
+
   // Exporters
   el.btnExportVideo.addEventListener('click', startExportingSubtitlesVideo);
   el.btnExportSRT.addEventListener('click', downloadSRTFile);
+  el.btnExportVideoMobile?.addEventListener('click', startExportingSubtitlesVideo);
+  el.btnExportSRTMobile?.addEventListener('click', downloadSRTFile);
+
+  // TTS (Kokoro) Controls
+  el.ttsSpeed.addEventListener('input', () => {
+    el.ttsSpeedVal.textContent = `${parseFloat(el.ttsSpeed.value).toFixed(1)}x`;
+  });
+  el.ttsPitch.addEventListener('input', () => {
+    el.ttsPitchVal.textContent = `${parseFloat(el.ttsPitch.value).toFixed(1)}x`;
+  });
+  el.btnGenerateTTS.addEventListener('click', generateTTSVoiceover);
+
+  // Sidebar Tab Switching
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  const tabPanels = document.querySelectorAll('.tab-panel');
+  const sidebarPanels = document.getElementById('sidebarPanels');
+  
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetTab = btn.dataset.tab;
+      const isAlreadyActive = btn.classList.contains('active') && sidebarPanels && sidebarPanels.classList.contains('open');
+      
+      tabButtons.forEach(b => b.classList.remove('active'));
+      tabPanels.forEach(p => p.classList.remove('active'));
+      
+      if (isAlreadyActive) {
+        if (sidebarPanels) sidebarPanels.classList.remove('open');
+      } else {
+        btn.classList.add('active');
+        const activePanel = document.getElementById(`panel-${targetTab}`);
+        if (activePanel) activePanel.classList.add('active');
+        if (sidebarPanels) sidebarPanels.classList.add('open');
+      }
+    });
+  });
+
+  const btnCloseDrawer = document.getElementById('btnCloseDrawer');
+  if (btnCloseDrawer) {
+    btnCloseDrawer.addEventListener('click', () => {
+      tabButtons.forEach(b => b.classList.remove('active'));
+      tabPanels.forEach(p => p.classList.remove('active'));
+      if (sidebarPanels) sidebarPanels.classList.remove('open');
+    });
+  }
+
+  // Save / Export dropdown toggling
+  if (el.btnExportToggle && el.exportDropdownMenu) {
+    el.btnExportToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      el.exportDropdownMenu.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+      if (!el.exportDropdownMenu.classList.contains('hidden') && !el.exportDropdownMenu.contains(e.target) && e.target !== el.btnExportToggle) {
+        el.exportDropdownMenu.classList.add('hidden');
+      }
+    });
+  }
+
+  // Click preview canvas viewport to toggle play/pause and trigger HUD icons
+  if (el.canvasViewport) {
+    el.canvasViewport.addEventListener('click', (e) => {
+      // If overlay is showing, let it handle the click (it might be the file upload prompt)
+      if (el.canvasOverlay && !el.canvasOverlay.classList.contains('hidden')) {
+        return;
+      }
+      
+      togglePlayback();
+      
+      // Trigger HUD overlay animation
+      if (el.hudOverlay) {
+        const isPlaying = wavesurfer && wavesurfer.isPlaying();
+        if (isPlaying) {
+          if (el.hudPlayIcon) el.hudPlayIcon.style.display = 'none';
+          if (el.hudPauseIcon) el.hudPauseIcon.style.display = 'block';
+        } else {
+          if (el.hudPlayIcon) el.hudPlayIcon.style.display = 'block';
+          if (el.hudPauseIcon) el.hudPauseIcon.style.display = 'none';
+        }
+        
+        el.hudOverlay.classList.remove('animate');
+        void el.hudOverlay.offsetWidth; // force reflow
+        el.hudOverlay.classList.add('animate');
+      }
+    });
+  }
+
+  // Click timeline track width wrapper to seek WaveSurfer
+  if (el.timelineTracksWidthWrapper) {
+    el.timelineTracksWidthWrapper.addEventListener('click', (e) => {
+      if (!wavesurfer || state.audioDuration === 0) return;
+      
+      // Ignore if clicked on a subtitle word block (it has its own click handler)
+      if (e.target.closest('.timeline-word-block')) {
+        return;
+      }
+      
+      const rect = el.timelineTracksWidthWrapper.getBoundingClientRect();
+      const style = window.getComputedStyle(el.timelineTracksWidthWrapper);
+      const paddingLeft = parseFloat(style.paddingLeft) || 0;
+      const clickX = e.clientX - rect.left - paddingLeft;
+      const clickTime = clickX / PIXELS_PER_SECOND;
+      
+      if (clickTime >= 0 && clickTime <= state.audioDuration) {
+        wavesurfer.setTime(clickTime);
+      }
+    });
+  }
 }
 
-// --- Local Storage API Keys ---
+// --- Status Indicator & Config ---
 function loadApiConfig() {
   state.api.provider = localStorage.getItem('capflow_api_provider') || 'local';
+  state.api.geminiKey = localStorage.getItem('capflow_gemini_key') || '';
+  state.api.openaiKey = localStorage.getItem('capflow_openai_key') || '';
+  
   updateApiFieldsVisibility();
   updateStatusIndicator();
 }
 
 function updateApiFieldsVisibility() {
+  if (!el.apiProvider) return;
   const provider = el.apiProvider.value;
-  el.geminiSettings.classList.add('hidden');
-  el.openaiSettings.classList.add('hidden');
+  el.geminiSettings?.classList.add('hidden');
+  el.openaiSettings?.classList.add('hidden');
   
-  if (provider === 'gemini') el.geminiSettings.classList.remove('hidden');
-  if (provider === 'openai') el.openaiSettings.classList.remove('hidden');
+  if (provider === 'gemini') el.geminiSettings?.classList.remove('hidden');
+  if (provider === 'openai') el.openaiSettings?.classList.remove('hidden');
 }
 
 function updateStatusIndicator() {
+  if (!el.statusDot) return;
   el.statusDot.className = 'status-dot';
   if (state.api.provider === 'local') {
-    el.statusDot.classList.add('idle');
-    el.statusText.textContent = 'Local AI Offline';
+    if (state.aiModelReady) {
+      el.statusDot.classList.add('active');
+      el.statusText.textContent = 'Local AI Ready';
+    } else if (state.workerFailed) {
+      el.statusDot.classList.add('error');
+      el.statusText.textContent = 'Local AI Failed';
+    } else {
+      el.statusDot.classList.add('idle');
+      el.statusText.textContent = 'Local AI Offline';
+    }
   } else {
     const isConfigured = (state.api.provider === 'gemini' && state.api.geminiKey) || 
                           (state.api.provider === 'openai' && state.api.openaiKey);
     if (isConfigured) {
       el.statusDot.classList.add('active');
-      el.statusText.textContent = `Cloud AI Mode (${state.api.provider.toUpperCase()})`;
+      el.statusText.textContent = `Cloud AI (${state.api.provider.toUpperCase()})`;
     } else {
       el.statusDot.classList.add('idle');
       el.statusText.textContent = 'Cloud Config Needed';
@@ -563,6 +867,13 @@ function updateStatusIndicator() {
 
 // --- Setup WaveSurfer ---
 function setupWaveSurfer() {
+  if (typeof WaveSurfer === 'undefined') {
+    console.warn("WaveSurfer library is not loaded. Using fallback mock.");
+    addLogLine("[WARNING] WaveSurfer library is unavailable (CDN offline or blocked). Audio playback is disabled.");
+    wavesurfer = wavesurferMock;
+    return;
+  }
+
   // Read colors from CSS variables to ensure high contrast in monochrome/custom themes
   const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8e8e9f';
   const primary = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || 'hsl(262, 85%, 60%)';
@@ -580,57 +891,110 @@ function setupWaveSurfer() {
     computedWaveColor = 'rgba(100, 100, 100, 0.25)';
   }
 
-  wavesurfer = WaveSurfer.create({
-    container: '#audioWaveform',
-    waveColor: computedWaveColor,
-    progressColor: secondary || 'var(--secondary)',
-    cursorColor: primary || 'var(--primary)',
-    cursorWidth: 2,
-    barWidth: 2,
-    barGap: 3,
-    height: 48,
-    fillParent: true,
-    interact: true
-  });
+  try {
+    wavesurfer = WaveSurfer.create({
+      container: '#audioWaveform',
+      waveColor: computedWaveColor,
+      progressColor: secondary || 'var(--secondary)',
+      cursorColor: primary || 'var(--primary)',
+      cursorWidth: 2,
+      barWidth: 2,
+      barGap: 3,
+      height: 48,
+      fillParent: true,
+      interact: true
+    });
 
-  // Sync state and redraw canvas when timeline scrubs
-  wavesurfer.on('timeupdate', (time) => {
-    state.currentTime = time;
-    el.currentTimeDisplay.textContent = `${formatTime(time)} / ${formatTime(state.audioDuration)}`;
-    el.timelinePositionDisplay.textContent = `Time: ${time.toFixed(2)}s | Frame: ${Math.floor(time * 30)} | Word Count: ${state.captions.length}`;
-    
-    // Highlight the active playing card
-    highlightActiveSubtitleWord(time);
-    
-    // Draw canvas
-    drawCanvas(time);
-    
-    // Update Tap-to-Sync bubble active states
-    if (state.tapSync.isActive && state.tapSync.isSyncing) {
-      updateTapBubbleActiveState(time);
-    }
-  });
+    // Safely wrap methods to prevent "No audio loaded" or other state exceptions in WaveSurfer v7
+    const safeMethods = ['getCurrentTime', 'getDuration', 'play', 'pause', 'stop', 'setTime', 'setVolume', 'setPlaybackRate', 'zoom'];
+    safeMethods.forEach(method => {
+      if (typeof wavesurfer[method] === 'function') {
+        const original = wavesurfer[method].bind(wavesurfer);
+        wavesurfer[method] = (...args) => {
+          try {
+            return original(...args);
+          } catch (e) {
+            // Silence common "No audio loaded" or other expected errors
+            if (e.message !== 'No audio loaded') {
+              console.warn(`WaveSurfer.${method} error:`, e.message);
+            }
+            if (method === 'getCurrentTime' || method === 'getDuration') return 0;
+            return null;
+          }
+        };
+      }
+    });
 
-  wavesurfer.on('play', () => {
-    state.isPlaying = true;
-    el.btnPlayPause.innerHTML = '<i class="fa-solid fa-pause"></i> Pause';
-    startRenderLoop();
-  });
+    // Sync state and redraw canvas when timeline scrubs
+    wavesurfer.on('timeupdate', (time) => {
+      state.currentTime = time;
+      el.currentTimeDisplay.textContent = `${formatTime(time)} / ${formatTime(state.audioDuration)}`;
+      if (el.currentTimeMobile) {
+        el.currentTimeMobile.textContent = formatTime(time);
+      }
+      if (el.durationTimeMobile) {
+        el.durationTimeMobile.textContent = formatTime(state.audioDuration);
+      }
+      el.timelinePositionDisplay.textContent = `Time: ${time.toFixed(2)}s | Frame: ${Math.floor(time * 30)} | Word Count: ${state.captions.length}`;
+      
+      // Highlight the active playing card
+      highlightActiveSubtitleWord(time);
+      
+      // Draw canvas
+      drawCanvas(time);
+      
+      // Auto-scroll timeline to keep playhead centered
+      if (el.timelineScrollContainer) {
+        el.timelineScrollContainer.scrollLeft = time * PIXELS_PER_SECOND;
+      }
+      
+      // Update Tap-to-Sync bubble active states
+      if (state.tapSync.isActive && state.tapSync.isSyncing) {
+        updateTapBubbleActiveState(time);
+      }
+    });
 
-  wavesurfer.on('pause', () => {
-    state.isPlaying = false;
-    el.btnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i> Play';
-    stopRenderLoop();
-  });
+    wavesurfer.on('ready', () => {
+      state.audioDuration = wavesurfer.getDuration();
+      const trackWidth = state.audioDuration * PIXELS_PER_SECOND;
+      if (el.timelineTracksWidthWrapper) {
+        el.timelineTracksWidthWrapper.style.width = `${trackWidth}px`;
+      }
+      if (el.currentTimeMobile) {
+        el.currentTimeMobile.textContent = '00:00.0';
+      }
+      if (el.durationTimeMobile) {
+        el.durationTimeMobile.textContent = formatTime(state.audioDuration);
+      }
+      renderTimelineWords();
+      renderTimelineRuler();
+    });
 
-  wavesurfer.on('finish', () => {
-    state.isPlaying = false;
-    el.btnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i> Play';
-    stopRenderLoop();
-    if (state.tapSync.isActive && state.tapSync.isSyncing) {
-      finishTapSync();
-    }
-  });
+    wavesurfer.on('play', () => {
+      state.isPlaying = true;
+      el.btnPlayPause.innerHTML = '<i class="fa-solid fa-pause"></i>';
+      startRenderLoop();
+    });
+
+    wavesurfer.on('pause', () => {
+      state.isPlaying = false;
+      el.btnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i>';
+      stopRenderLoop();
+    });
+
+    wavesurfer.on('finish', () => {
+      state.isPlaying = false;
+      el.btnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i>';
+      stopRenderLoop();
+      if (state.tapSync.isActive && state.tapSync.isSyncing) {
+        finishTapSync();
+      }
+    });
+  } catch (err) {
+    console.error("WaveSurfer initialization failed:", err);
+    addLogLine(`[WARNING] WaveSurfer initialization failed: ${err.message}. Fallback mock active.`);
+    wavesurfer = wavesurferMock;
+  }
 }
 
 // --- Web Worker Initialization (Whisper AI) ---
@@ -648,6 +1012,239 @@ function initWorker() {
   } else {
     addLogLine('Web Workers not supported. Main-thread AI fallback will be used.');
     state.workerFailed = true;
+  }
+}
+
+// --- TTS Worker Initialization (Kokoro AI) ---
+function initTTSWorker() {
+  if (typeof Worker !== 'undefined') {
+    try {
+      ttsWorker = new Worker('tts-worker.js?cb=' + Date.now(), { type: 'module' });
+      setupTTSWorkerListeners();
+      addTTSLog('TTS Worker created. Kokoro library loading from CDN...');
+    } catch (e) {
+      console.warn('TTS Worker failed:', e.message);
+      addTTSLog(`TTS Worker failed: ${e.message}`);
+    }
+  } else {
+    addTTSLog('Web Workers not supported. TTS unavailable.');
+  }
+}
+
+function setupTTSWorkerListeners() {
+  if (!ttsWorker) return;
+
+  ttsWorker.onerror = (e) => {
+    console.error('TTS Worker error:', e);
+    addTTSLog(`[TTS ERROR] ${e.message || 'Worker script failed.'}`);
+    state.tts.isGenerating = false;
+    el.btnGenerateTTS.classList.remove('generating');
+    el.btnGenerateTTS.removeAttribute('disabled');
+  };
+
+  ttsWorker.onmessage = (event) => {
+    const { status, progress, loaded, total, file, message, audio, sampleRate, voices, error } = event.data;
+
+    if (status === 'downloading') {
+      el.ttsDownloadProgress.classList.remove('hidden');
+      const percent = Math.round(progress || 0);
+      el.ttsProgressPercent.textContent = `${percent}%`;
+      el.ttsProgressFill.style.width = `${percent}%`;
+      addTTSLog(`Downloading: ${file || 'model'} (${((loaded || 0) / 1024 / 1024).toFixed(1)}MB / ${((total || 1) / 1024 / 1024).toFixed(1)}MB)`);
+    }
+
+    else if (status === 'ready') {
+      el.ttsDownloadProgress.classList.add('hidden');
+      state.tts.modelReady = true;
+      addTTSLog(message || 'Kokoro TTS model loaded!');
+      if (voices) {
+        addTTSLog(`Available voices: ${Array.isArray(voices) ? voices.length : Object.keys(voices).length}`);
+      }
+
+      // If generation was pending (model just loaded), trigger it now
+      if (state.tts.isGenerating) {
+        sendTTSGenerateRequest();
+      }
+    }
+
+    else if (status === 'progress') {
+      addTTSLog(message);
+    }
+
+    else if (status === 'success') {
+      addTTSLog('Voice generation complete!');
+      processTTSOutput(audio, sampleRate);
+    }
+
+    else if (status === 'error') {
+      addTTSLog(`[TTS ERROR] ${error}`);
+      state.tts.isGenerating = false;
+      el.btnGenerateTTS.classList.remove('generating');
+      el.btnGenerateTTS.removeAttribute('disabled');
+      alert(`TTS Error: ${error}`);
+    }
+  };
+}
+
+function addTTSLog(text) {
+  el.ttsStatus.classList.remove('hidden');
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  el.ttsLogLines.appendChild(line);
+  el.ttsLogLines.scrollTop = el.ttsLogLines.scrollHeight;
+}
+
+// --- TTS Generation Pipeline ---
+async function generateTTSVoiceover() {
+  const text = el.pastedText.value.trim();
+  if (!text) {
+    alert('Please paste your script text into the text box above first.');
+    return;
+  }
+
+  if (state.tts.isGenerating) return;
+
+  state.tts.isGenerating = true;
+  el.btnGenerateTTS.classList.add('generating');
+  el.btnGenerateTTS.setAttribute('disabled', 'true');
+  addTTSLog('Starting voice generation...');
+
+  if (!ttsWorker) {
+    initTTSWorker();
+  }
+
+  if (ttsWorker) {
+    if (state.tts.modelReady) {
+      sendTTSGenerateRequest();
+    } else {
+      addTTSLog('Loading Kokoro TTS model...');
+      ttsWorker.postMessage({ type: 'load' });
+    }
+  } else {
+    state.tts.isGenerating = false;
+    el.btnGenerateTTS.classList.remove('generating');
+    el.btnGenerateTTS.removeAttribute('disabled');
+    alert("TTS Worker failed to initialize. Likely you opened the HTML file directly (file:/// protocol) or your browser blocks Module Workers. Please run a local server.");
+    addTTSLog("[ERROR] TTS Worker is unavailable.");
+  }
+}
+
+function sendTTSGenerateRequest() {
+  if (!ttsWorker) {
+    addTTSLog("[ERROR] Cannot send request: TTS Worker is null.");
+    return;
+  }
+  const text = el.pastedText.value.trim();
+  const voice = el.ttsVoice.value;
+  const speed = parseFloat(el.ttsSpeed.value);
+  const pitchFactor = parseFloat(el.ttsPitch.value);
+
+  // When pitch != 1.0, we adjust the generation speed to compensate for
+  // the resampling that will shift the pitch.
+  // Generate at speed * pitchFactor, then resample by 1/pitchFactor.
+  const adjustedSpeed = speed * pitchFactor;
+
+  addTTSLog(`Voice: ${voice} | Speed: ${speed}x | Pitch: ${pitchFactor}x (gen speed: ${adjustedSpeed.toFixed(2)}x)`);
+
+  ttsWorker.postMessage({
+    type: 'generate',
+    data: {
+      text: text,
+      voice: voice,
+      speed: adjustedSpeed
+    }
+  });
+}
+
+function processTTSOutput(audioData, sampleRate) {
+  const pitchFactor = parseFloat(el.ttsPitch.value);
+
+  // Apply pitch shift via resampling if pitch != 1.0
+  let processedAudio = audioData;
+  if (Math.abs(pitchFactor - 1.0) > 0.01) {
+    addTTSLog(`Applying pitch shift (factor: ${pitchFactor.toFixed(1)}x)...`);
+    processedAudio = resampleForPitch(audioData, pitchFactor);
+  }
+
+  // Encode to WAV
+  addTTSLog('Encoding WAV audio...');
+  const wavBlob = encodeWAV(processedAudio, sampleRate);
+
+  // Create a File object and feed it into the existing audio pipeline
+  const wavFile = new File([wavBlob], 'kokoro-voiceover.wav', { type: 'audio/wav' });
+
+  addTTSLog(`Generated ${(wavFile.size / 1024 / 1024).toFixed(2)}MB WAV file. Loading into player...`);
+
+  state.tts.isGenerating = false;
+  el.btnGenerateTTS.classList.remove('generating');
+  el.btnGenerateTTS.removeAttribute('disabled');
+
+  // Feed into the audio pipeline — but skip Whisper transcription since
+  // we already know the exact text. Use handleTTSAudioFile which loads
+  // the audio and runs Whisper for word-level timestamps.
+  handleAudioFile(wavFile);
+}
+
+// Pitch-shift via linear interpolation resampling
+function resampleForPitch(audioData, pitchFactor) {
+  const newLength = Math.round(audioData.length / pitchFactor);
+  const result = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i++) {
+    const srcIndex = i * pitchFactor;
+    const srcFloor = Math.floor(srcIndex);
+    const srcCeil = Math.min(srcFloor + 1, audioData.length - 1);
+    const frac = srcIndex - srcFloor;
+    result[i] = audioData[srcFloor] * (1 - frac) + audioData[srcCeil] * frac;
+  }
+  return result;
+}
+
+// Encode Float32Array to 16-bit PCM WAV blob
+function encodeWAV(samples, sampleRate) {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataLength = samples.length * (bitsPerSample / 8);
+  const headerLength = 44;
+  const totalLength = headerLength + dataLength;
+
+  const buffer = new ArrayBuffer(totalLength);
+  const view = new DataView(buffer);
+
+  // RIFF header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, totalLength - 8, true);
+  writeString(view, 8, 'WAVE');
+
+  // fmt chunk
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true);  // PCM format
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+
+  // data chunk
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  // Write PCM samples (float32 -> int16)
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
   }
 }
 
@@ -777,6 +1374,11 @@ function handleAudioFile(file) {
       const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       state.audioBuffer = decodedBuffer;
       state.audioDuration = decodedBuffer.duration;
+      const trackWidth = state.audioDuration * PIXELS_PER_SECOND;
+      if (el.timelineTracksWidthWrapper) {
+        el.timelineTracksWidthWrapper.style.width = `${trackWidth}px`;
+      }
+      renderTimelineWords();
       
       // Original buffer diagnostics
       const origChannelData = decodedBuffer.getChannelData(0);
@@ -793,6 +1395,12 @@ function handleAudioFile(file) {
       
       // Update UI displays
       el.currentTimeDisplay.textContent = `00:00.0 / ${formatTime(decodedBuffer.duration)}`;
+      if (el.currentTimeMobile) {
+        el.currentTimeMobile.textContent = '00:00.0';
+      }
+      if (el.durationTimeMobile) {
+        el.durationTimeMobile.textContent = formatTime(decodedBuffer.duration);
+      }
       
       // Enable Sync triggers
       el.btnRunAISync.removeAttribute('disabled');
@@ -829,16 +1437,22 @@ function removeAudioFile() {
   if (el.audioFileHint) el.audioFileHint.classList.remove('hidden');
   resetUploadPrompt();
   
+  disableExporters();
   el.btnRunAISync.setAttribute('disabled', 'true');
   el.btnPlayPause.setAttribute('disabled', 'true');
   el.btnStop.setAttribute('disabled', 'true');
-  el.btnExportVideo.setAttribute('disabled', 'true');
-  el.btnExportSRT.setAttribute('disabled', 'true');
   el.btnAddWord.setAttribute('disabled', 'true');
   el.btnClearAllWords.setAttribute('disabled', 'true');
 
   state.captions = [];
+  if (el.timelineTracksWidthWrapper) {
+    el.timelineTracksWidthWrapper.style.width = '0px';
+  }
+  if (el.currentTimeMobile) el.currentTimeMobile.textContent = '00:00.0';
+  if (el.durationTimeMobile) el.durationTimeMobile.textContent = '00:00.0';
   renderSubtitleEditor();
+  renderTimelineWords();
+  renderTimelineRuler();
   drawCanvas(0);
 }
 
@@ -890,46 +1504,26 @@ async function runAISynchronization() {
 
   showTranscribingLoading('AI Sync Transcribing...');
 
-  if (state.api.provider === 'local') {
-    el.statusDot.className = 'status-dot loading';
-    el.statusText.textContent = 'Loading Local AI...';
-    wavesurfer.pause();
+  el.statusDot.className = 'status-dot loading';
+  el.statusText.textContent = 'Loading Local AI...';
+  wavesurfer.pause();
 
-    // If worker has failed (or never loaded), use main-thread fallback directly
-    if (state.workerFailed || !aiWorker) {
-      addLogLine('Using main-thread AI (worker unavailable)...');
-      await runMainThreadTranscription();
-      return;
-    }
+  // If worker has failed (or never loaded), use main-thread fallback directly
+  if (state.workerFailed || !aiWorker) {
+    addLogLine('Using main-thread AI (worker unavailable)...');
+    await runMainThreadTranscription();
+    return;
+  }
 
-    // If model is already loaded in worker, send transcription directly
-    if (state.aiModelReady) {
-      state.pendingTranscription = true;
-      await sendAudioForTranscription();
-    } else {
-      // Load the model first — transcription will be triggered on 'ready' callback
-      state.pendingTranscription = true;
-      addLogLine('Requesting AI model load via worker...');
-      aiWorker.postMessage({ type: 'load' });
-    }
-  }
-  
-  else if (state.api.provider === 'gemini') {
-    if (!state.api.geminiKey) {
-      alert('Please enter your Google Gemini API Key in Settings first.');
-      el.btnSettings.click();
-      return;
-    }
-    await runGeminiCloudSync();
-  }
-  
-  else if (state.api.provider === 'openai') {
-    if (!state.api.openaiKey) {
-      alert('Please enter your OpenAI API Key in Settings first.');
-      el.btnSettings.click();
-      return;
-    }
-    await runOpenAICloudSync();
+  // If model is already loaded in worker, send transcription directly
+  if (state.aiModelReady) {
+    state.pendingTranscription = true;
+    await sendAudioForTranscription();
+  } else {
+    // Load the model first — transcription will be triggered on 'ready' callback
+    state.pendingTranscription = true;
+    addLogLine('Requesting AI model load via worker...');
+    aiWorker.postMessage({ type: 'load' });
   }
 }
 
@@ -1062,7 +1656,7 @@ async function runMainThreadTranscription() {
     el.statusText.textContent = 'AI Failed';
     addLogLine(`[Main Thread ERROR] ${error.message}`);
     console.error('Main thread AI error:', error);
-    alert(`AI Transcription Failed: ${error.message}\n\nAlternatives:\n1. Use "Smart Estimator Sync" (paste your text + upload audio)\n2. Use "Tap-to-Sync" to manually sync\n3. Configure Gemini API in Settings for cloud sync`);
+    alert(`AI Transcription Failed: ${error.message}\n\nAlternatives:\n1. Use "Smart Estimator Sync" (paste your text + upload audio)\n2. Use "Tap-to-Sync" to manually sync`);
     resetUploadPrompt();
   }
 }
@@ -1175,7 +1769,7 @@ function realignCaptions() {
   const pastedTextRaw = el.pastedText.value.trim();
   const transcribedWords = getWordLevelTimestamps(state.rawWhisperChunks);
   
-  if (pastedTextRaw) {
+  if (pastedTextRaw && el.chkAlignPastedText && el.chkAlignPastedText.checked) {
     state.captions = alignPastedTextWithWordTimestamps(pastedTextRaw, transcribedWords);
     addLogLine(`Successfully aligned ${state.captions.length} custom text words with precise word-level audio timestamps!`);
   } else {
@@ -1207,167 +1801,7 @@ function processLocalWhisperOutput(result) {
   realignCaptions();
 }
 
-// --- Gemini Cloud Sync ---
-async function runGeminiCloudSync() {
-  addLogLine('Initializing Gemini Cloud Sync...');
-  wavesurfer.pause();
-  showTranscribingLoading('Uploading & Transcribing with Google Gemini AI...');
 
-  const file = state.audioFile;
-  const apiKey = state.api.geminiKey;
-
-  // Convert audio file to Base64
-  addLogLine('Reading audio file as Base64...');
-  const reader = new FileReader();
-  reader.readAsDataURL(file);
-  
-  reader.onload = async () => {
-    const base64Data = reader.result.split(',')[1];
-    
-    try {
-      addLogLine('Uploading audio and transcribing via Gemini 1.5 Flash...');
-      
-      const prompt = `Transcribe the audio file. Return a JSON array of word objects, where each object has precisely:
-      'word' (string, the exact spoken word),
-      'start' (float, start time in seconds),
-      'end' (float, end time in seconds).
-      Return ONLY valid raw JSON array, no markdown markers, no extra text, just raw JSON.`;
-
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { inlineData: { mimeType: file.type, data: base64Data } },
-              { text: prompt }
-            ]
-          }],
-          generationConfig: { 
-            responseMimeType: "application/json"
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.statusText} (${response.status})`);
-      }
-
-      const resJson = await response.json();
-      const textResponse = resJson.candidates[0].content.parts[0].text;
-      
-      // Parse JSON from Gemini response
-      let geminiWords = [];
-      try {
-        geminiWords = JSON.parse(textResponse.trim());
-      } catch (err) {
-        // Strip markdown backticks if Gemini added any
-        const cleanedText = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-        geminiWords = JSON.parse(cleanedText);
-      }
-
-      if (Array.isArray(geminiWords)) {
-        // If user provided custom text, we match words, else use direct gemini words
-        const pastedTextRaw = el.pastedText.value.trim();
-        if (pastedTextRaw) {
-          const userWords = pastedTextRaw.split(/\s+/).filter(w => w.length > 0);
-          state.captions = userWords.map((word, idx) => {
-            const match = geminiWords[Math.min(idx, geminiWords.length - 1)] || { start: 0, end: 1 };
-            return {
-              id: idx + 1,
-              word: word,
-              start: parseFloat(match.start.toFixed(3)),
-              end: parseFloat(match.end.toFixed(3))
-            };
-          });
-        } else {
-          state.captions = geminiWords.map((item, idx) => ({
-            id: idx + 1,
-            word: item.word,
-            start: parseFloat(item.start.toFixed(3)),
-            end: parseFloat(item.end.toFixed(3))
-          }));
-        }
-        
-        onCaptionsUpdated();
-        addLogLine(`Gemini synced ${state.captions.length} words!`);
-      } else {
-        throw new Error('Gemini API returned JSON that was not an array of words.');
-      }
-    } catch (err) {
-      addLogLine(`[ERROR] Gemini Cloud Sync failed: ${err.message}`);
-      alert(`Gemini Sync failed: ${err.message}`);
-      resetUploadPrompt();
-    }
-  };
-}
-
-// --- OpenAI Cloud Sync ---
-async function runOpenAICloudSync() {
-  addLogLine('Initializing OpenAI Whisper Cloud Sync...');
-  wavesurfer.pause();
-  showTranscribingLoading('Uploading & Transcribing with OpenAI Whisper API...');
-
-  const file = state.audioFile;
-  const apiKey = state.api.openaiKey;
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('model', 'whisper-1');
-  formData.append('response_format', 'verbose_json');
-  formData.append('timestamp_granularities[]', 'word');
-
-  try {
-    addLogLine('Sending audio file to OpenAI Whisper API...');
-    
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP Error: ${response.statusText} (${response.status})`);
-    }
-
-    const resJson = await response.json();
-    const whisperWords = resJson.words || [];
-
-    if (whisperWords.length > 0) {
-      const pastedTextRaw = el.pastedText.value.trim();
-      if (pastedTextRaw) {
-        const userWords = pastedTextRaw.split(/\s+/).filter(w => w.length > 0);
-        state.captions = userWords.map((word, idx) => {
-          const match = whisperWords[Math.min(idx, whisperWords.length - 1)] || { start: 0, end: 1 };
-          return {
-            id: idx + 1,
-            word: word,
-            start: parseFloat(match.start.toFixed(3)),
-            end: parseFloat(match.end.toFixed(3))
-          };
-        });
-      } else {
-        state.captions = whisperWords.map((w, idx) => ({
-          id: idx + 1,
-          word: w.word,
-          start: parseFloat(w.start.toFixed(3)),
-          end: parseFloat(w.end.toFixed(3))
-        }));
-      }
-
-      onCaptionsUpdated();
-      addLogLine(`OpenAI synced ${state.captions.length} words!`);
-    } else {
-      throw new Error('OpenAI Whisper did not return word-level timestamps in the response.');
-    }
-  } catch (err) {
-    addLogLine(`[ERROR] OpenAI Cloud Sync failed: ${err.message}`);
-    alert(`OpenAI Sync failed: ${err.message}`);
-    resetUploadPrompt();
-  }
-}
 
 // --- Smart Time Estimator (Weighted by word length for natural pacing) ---
 function runEstimatorSync() {
@@ -1610,19 +2044,37 @@ function finishTapSync() {
 }
 
 // --- Captions Core handlers ---
+function enableExporters() {
+  el.btnExportVideo?.removeAttribute('disabled');
+  el.btnExportSRT?.removeAttribute('disabled');
+  el.btnExportVideoMobile?.removeAttribute('disabled');
+  el.btnExportSRTMobile?.removeAttribute('disabled');
+  el.btnExportToggle?.removeAttribute('disabled');
+}
+
+function disableExporters() {
+  el.btnExportVideo?.setAttribute('disabled', 'true');
+  el.btnExportSRT?.setAttribute('disabled', 'true');
+  el.btnExportVideoMobile?.setAttribute('disabled', 'true');
+  el.btnExportSRTMobile?.setAttribute('disabled', 'true');
+  el.btnExportToggle?.setAttribute('disabled', 'true');
+  if (el.exportDropdownMenu) {
+    el.exportDropdownMenu.classList.add('hidden');
+  }
+}
+
 function onCaptionsUpdated() {
   renderSubtitleEditor();
+  renderTimelineWords();
   
   // Enable exporters
   if (state.captions.length > 0) {
-    el.btnExportVideo.removeAttribute('disabled');
-    el.btnExportSRT.removeAttribute('disabled');
+    enableExporters();
     el.btnAddWord.removeAttribute('disabled');
     el.btnClearAllWords.removeAttribute('disabled');
     hideTranscribingLoading();
   } else {
-    el.btnExportVideo.setAttribute('disabled', 'true');
-    el.btnExportSRT.setAttribute('disabled', 'true');
+    disableExporters();
     el.btnAddWord.setAttribute('disabled', 'true');
     el.btnClearAllWords.setAttribute('disabled', 'true');
     resetUploadPrompt();
@@ -1724,12 +2176,141 @@ function renderSubtitleEditor() {
   });
 }
 
+// Render horizontal timeline word blocks proportional to their durations
+function renderTimelineWords() {
+  const track = el.timelineSubtitleTrack;
+  if (!track) return;
+  
+  track.innerHTML = '';
+  
+  if (state.captions.length === 0) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'timeline-no-data-msg';
+    placeholder.textContent = 'Upload audio file to view caption timeline';
+    track.appendChild(placeholder);
+    return;
+  }
+  
+  state.captions.forEach((cap, index) => {
+    const block = document.createElement('div');
+    block.className = 'timeline-word-block';
+    block.id = `timeline-word-${index}`;
+    block.dataset.index = index;
+    
+    // Position blocks absolutely on the horizontal timeline
+    const left = cap.start * PIXELS_PER_SECOND;
+    const duration = cap.end - cap.start;
+    const width = Math.max(15, (duration * PIXELS_PER_SECOND) - 4);
+    
+    block.style.left = `${left}px`;
+    block.style.width = `${width}px`;
+    
+    const span = document.createElement('span');
+    span.textContent = cap.word;
+    block.appendChild(span);
+    
+    // Clicking seeks WaveSurfer playhead
+    block.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (wavesurfer) {
+        wavesurfer.setTime(cap.start);
+      }
+    });
+    
+    // Double clicking jumps to Sidebar Subtitle Editor card, scrolls it, and focuses it
+    block.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      
+      // Select the sidebar tab editor
+      const tabBtn = document.querySelector('.tab-btn[data-tab="editor"]');
+      if (tabBtn) {
+        tabBtn.click();
+      }
+      
+      // Delay slightly to allow panel display transition, then scroll and focus
+      setTimeout(() => {
+        const card = document.getElementById(`edit-card-${index}`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const input = card.querySelector('input[type="text"]');
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }
+      }, 80);
+    });
+    
+    track.appendChild(block);
+  });
+}
+
+// Render a high-performance Canvas-based timeline ruler
+function renderTimelineRuler() {
+  const canvas = document.getElementById('timelineRulerCanvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  const duration = state.audioDuration || 0;
+  const width = duration * PIXELS_PER_SECOND;
+
+  // Set canvas dimensions
+  canvas.width = width;
+  canvas.height = 24;
+
+  ctx.clearRect(0, 0, width, 24);
+
+  if (duration <= 0) return;
+
+  // Configure styling to match the light peach/warm slate theme
+  ctx.strokeStyle = 'rgba(74, 56, 52, 0.2)'; // Warm slate brown line with opacity
+  ctx.fillStyle = '#4a3834'; // Slate brown text color
+  ctx.font = '10px JetBrains Mono, monospace, sans-serif';
+  ctx.textBaseline = 'top';
+
+  const step = 0.1; // Draw tick every 100ms
+  const numTicks = Math.ceil(duration / step);
+
+  for (let i = 0; i <= numTicks; i++) {
+    const t = i * step;
+    const x = t * PIXELS_PER_SECOND;
+
+    ctx.beginPath();
+    ctx.moveTo(x, 24);
+
+    if (Math.abs(t % 1) < 1e-9) {
+      // Major tick: 1s, 2s...
+      ctx.lineTo(x, 8);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(74, 56, 52, 0.45)';
+      ctx.stroke();
+      ctx.fillText(`${Math.round(t)}s`, x + 3, 2);
+    } else if (Math.abs((t * 2) % 1) < 1e-9) {
+      // Half-second tick: 0.5s, 1.5s...
+      ctx.lineTo(x, 14);
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = 'rgba(74, 56, 52, 0.25)';
+      ctx.stroke();
+    } else {
+      // Minor tick: 0.1s, 0.2s...
+      ctx.lineTo(x, 18);
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = 'rgba(74, 56, 52, 0.15)';
+      ctx.stroke();
+    }
+  }
+}
+
+
 function highlightActiveSubtitleWord(time) {
   document.querySelectorAll('.word-edit-card').forEach(card => card.classList.remove('active-playing'));
+  document.querySelectorAll('.timeline-word-block').forEach(block => block.classList.remove('active'));
 
   const activeIndex = state.captions.findIndex(c => time >= c.start && time <= c.end);
   if (activeIndex !== -1) {
     state.activeCaptionIndex = activeIndex;
+    
+    // Sidebar card highlight
     const card = document.getElementById(`edit-card-${activeIndex}`);
     if (card) {
       card.classList.add('active-playing');
@@ -1748,6 +2329,12 @@ function highlightActiveSubtitleWord(time) {
           });
         }
       }
+    }
+
+    // Timeline block highlight
+    const block = document.getElementById(`timeline-word-${activeIndex}`);
+    if (block) {
+      block.classList.add('active');
     }
   } else {
     state.activeCaptionIndex = -1;
@@ -2210,7 +2797,7 @@ async function startExportingSubtitlesVideo() {
   if (state.captions.length === 0 || !state.audioFile) return;
 
   state.isExporting = true;
-  el.btnExportVideo.setAttribute('disabled', 'true');
+  disableExporters();
   el.exportProgressContainer.classList.remove('hidden');
   
   wavesurfer.pause();
@@ -2293,7 +2880,7 @@ async function startExportingSubtitlesVideo() {
 
     // Reset UI
     state.isExporting = false;
-    el.btnExportVideo.removeAttribute('disabled');
+    enableExporters();
     el.exportProgressContainer.classList.add('hidden');
     addLogLine(`Video export completed! File downloaded.`);
     alert('Subtitles video successfully rendered and downloaded!');
