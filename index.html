@@ -92,6 +92,19 @@
         <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
         <h1>CaptionFlow <span>Studio</span></h1>
       </div>
+
+      <!-- Mode Switcher -->
+      <div class="mode-switcher" id="modeSwitcher">
+        <button class="mode-btn active" id="btnCaptionMode" data-mode="caption">
+          <i class="fa-solid fa-closed-captioning"></i>
+          <span>Caption Mode</span>
+        </button>
+        <button class="mode-btn" id="btnVideoMode" data-mode="video">
+          <i class="fa-solid fa-film"></i>
+          <span>Video Mode</span>
+        </button>
+      </div>
+
       <div class="status-indicator" id="aiStatusIndicator">
         <span class="status-dot idle"></span>
         <span class="status-text" id="statusText">AI Model Offline</span>
@@ -106,7 +119,7 @@
             <i class="fa-solid fa-download"></i> Export <i class="fa-solid fa-chevron-down" style="font-size: 0.75rem; margin-left: 4px;"></i>
           </button>
           <div class="export-dropdown-content hidden" id="exportDropdownMenu">
-            <button class="dropdown-item btn-export-video" id="btnExportVideoMobile"><i class="fa-solid fa-video"></i> Render Subtitles Video</button>
+            <button class="dropdown-item btn-export-video" id="btnExportVideoMobile"><i class="fa-solid fa-video"></i> Render Caption Video</button>
             <button class="dropdown-item btn-export-srt" id="btnExportSRTMobile"><i class="fa-solid fa-file-lines"></i> Export .SRT Subtitles</button>
           </div>
         </div>
@@ -337,16 +350,13 @@
         <section class="panel center-panel glass-panel" id="desktopCenterPanel">
           <div class="panel-header">
             <i class="fa-solid fa-play"></i>
-            <h2>Video Preview</h2>
+            <h2>Caption Preview</h2>
             <div class="header-actions-preview" style="margin-left: auto; display: flex; gap: 8px; align-items: center;" id="bgSelectorCard">
-              <button id="btnUploadBg" class="aspect-btn" title="Upload Custom Background Video/Image"><i class="fa-solid fa-images"></i> Background Media</button>
-              <div class="bg-selector-row" style="margin-left: 8px;">
-                <button class="bg-btn active" data-bg="grid" title="Transparent Grid"><i class="fa-solid fa-border-none"></i> Grid</button>
-                <button class="bg-btn" data-bg="green" title="Chroma Key Green Screen"><span class="color-dot green-dot"></span> Green</button>
-                <button class="bg-btn" data-bg="black" title="Solid Black"><span class="color-dot black-dot"></span> Black</button>
-                <button class="bg-btn" data-bg="custom" id="btnActiveCustomBg" style="display: none;" title="Custom Background Media"><i class="fa-solid fa-images"></i> Custom</button>
-                <input type="file" id="bgFileInput" accept="video/*,image/*" class="hidden">
+              <div class="mode-context-chip">
+                <i class="fa-solid fa-layer-group"></i>
+                <span>Transparent caption-only workflow</span>
               </div>
+              <input type="file" id="bgFileInput" accept="video/*,image/*" class="hidden">
             </div>
           </div>
           <div class="panel-content center-layout" id="desktopCenterContent">
@@ -357,9 +367,9 @@
               <div class="bg-media-container" id="bgMediaContainer"></div>
               <div class="canvas-overlay clickable" id="canvasOverlay">
                 <div class="overlay-prompt" id="canvasUploadPrompt">
-                  <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
-                  <p class="main-prompt">Upload an Audio or Video File</p>
-                  <p class="sub-prompt">Drag & drop or click here to upload narration or video</p>
+                  <i class="fa-solid fa-file-audio animate-pulse"></i>
+                  <p class="main-prompt">Upload Narration Audio</p>
+                  <p class="sub-prompt">Drag & drop or click here to upload MP3, WAV, or other audio for caption sync</p>
                 </div>
                 <div class="overlay-prompt hidden" id="canvasLoadingPrompt">
                   <div class="ai-loading-spinner" style="margin-bottom: 16px;"></div>
@@ -428,30 +438,24 @@
             <!-- Desktop Exporter Section -->
             <div class="export-section" id="exportSectionDesktop">
               <div class="export-header">
-                <h3><i class="fa-solid fa-video"></i> Render & Export Video Captions</h3>
+                <h3><i class="fa-solid fa-video"></i> Render Transparent Caption Video</h3>
               </div>
               <div class="export-options-grid">
                 <div class="control-group">
-                  <label for="exportFormat">Export Format</label>
-                  <select id="exportFormat">
-                    <option value="composite" selected>Download Whole Video with Captions (compositing background video, audio, and captions at high quality)</option>
-                    <option value="webm-transparent">Download Caption Video Only (Transparent WebM)</option>
-                    <option value="webm-green">Download Caption Video Only (Chroma Green WebM)</option>
-                    <option value="mp4-green">Download Caption Video Only (Chroma Green MP4)</option>
-                    <option value="webm-black">Download Caption Video Only (Black Background WebM)</option>
+                  <label>Output</label>
+                  <div class="export-mode-note">Transparent WebM with captions only. No baked background, no embedded audio.</div>
+                  <select id="exportFormat" class="hidden">
+                    <option value="webm-transparent" selected>Transparent WebM</option>
                   </select>
-                </div>
-                <div class="control-group">
-                  <label for="exportAudio">Audio Track</label>
-                  <select id="exportAudio">
-                    <option value="include" selected>Include Narrator Audio</option>
-                    <option value="silent">Muted (Subtitles Only)</option>
+                  <select id="exportAudio" class="hidden">
+                    <option value="silent" selected>Muted</option>
                   </select>
                 </div>
               </div>
               <div class="export-actions">
-                <button id="btnExportVideo" class="btn-primary" disabled><i class="fa-solid fa-circle-arrow-down"></i> Render Subtitles Video</button>
+                <button id="btnExportVideo" class="btn-primary" disabled><i class="fa-solid fa-circle-arrow-down"></i> Render Caption Video</button>
                 <button id="btnExportSRT" class="btn-secondary" disabled><i class="fa-solid fa-file-lines"></i> Export .SRT Subtitles</button>
+                <button id="btnSendToVideoMode" class="btn-secondary" disabled><i class="fa-solid fa-film"></i> Continue In Video Mode</button>
               </div>
               <!-- Export Progress Bar -->
               <div id="exportProgressContainer" class="hidden render-status-card">
@@ -584,16 +588,16 @@
               </div>
             </div>
 
-            <!-- 4. Audio/Video File Details -->
+            <!-- 4. Audio File Details -->
             <div class="section-card" id="audioDetailsCard">
-              <h3><i class="fa-solid fa-file-video"></i> Narration / Video File</h3>
-              <input type="file" id="audioFileInput" accept="audio/*,video/*" class="hidden">
+              <h3><i class="fa-solid fa-file-audio"></i> Narration Audio</h3>
+              <input type="file" id="audioFileInput" accept="audio/*" class="hidden">
               <div id="audioFileDetails" class="hidden file-details-box">
-                <span class="file-name" id="selectedFileName">video.mp4</span>
+                <span class="file-name" id="selectedFileName">voiceover.wav</span>
                 <span class="file-size" id="selectedFileSize">0.0 MB</span>
                 <button id="btnRemoveAudio" class="remove-btn" title="Remove File"><i class="fa-solid fa-times"></i></button>
               </div>
-              <p id="audioFileHint" class="transcript-hint" style="margin: 0; text-align: center;">No media file uploaded yet. Upload via the video preview container or drag & drop here.</p>
+              <p id="audioFileHint" class="transcript-hint" style="margin: 0; text-align: center;">No audio uploaded yet. Upload narration here or generate it from the script above.</p>
             </div>
 
             <!-- 5. Tap to Sync Overlay Panel -->
@@ -634,7 +638,7 @@
                 <div class="empty-transcript-placeholder">
                   <i class="fa-solid fa-quote-left"></i>
                   <p>No synced subtitles yet.</p>
-                  <p>Generate audio or run sync to view transcripts.</p>
+                  <p>Upload audio or generate a voiceover to build captions.</p>
                 </div>
               </div>
             </div>
@@ -643,16 +647,237 @@
         </section>
       </div>
 
+      <!-- ============================================================ -->
+      <!-- VIDEO MODE DESKTOP LAYOUT                                     -->
+      <!-- ============================================================ -->
+      <div class="video-mode-layout hidden" id="videoModeLayout">
+
+        <!-- VM Left Panel: Caption Customizer (same style controls, shared via JS) -->
+        <section class="panel left-panel glass-panel vm-panel">
+          <div class="panel-header">
+            <i class="fa-solid fa-palette"></i>
+            <h2>Caption Style</h2>
+          </div>
+          <div class="panel-content scrollable" id="vmLeftContent">
+            <!-- Style cards cloned/shared here in Video Mode via JS -->
+            <p class="vm-placeholder-hint"><i class="fa-solid fa-palette"></i> Caption style controls mirror Caption Mode settings.</p>
+          </div>
+        </section>
+
+        <!-- VM Center Panel: Preview Canvas + Timeline -->
+        <section class="panel center-panel glass-panel vm-panel" id="vmCenterPanel">
+          <div class="panel-header">
+            <i class="fa-solid fa-film"></i>
+            <h2>Video Preview</h2>
+            <div class="header-actions-preview" style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+              <!-- Aspect toggles -->
+              <div class="aspect-toggles">
+                <button id="vmBtnAspectPortrait" class="toolbar-btn active" title="Portrait 9:16">
+                  <i class="fa-solid fa-mobile-screen"></i> 9:16
+                </button>
+                <button id="vmBtnAspectLandscape" class="toolbar-btn" title="Landscape 16:9">
+                  <i class="fa-solid fa-tv"></i> 16:9
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-content center-layout" id="vmCenterContent">
+
+            <!-- VM Canvas Viewport -->
+            <div class="canvas-viewport portrait-mode" id="vmCanvasViewport">
+              <canvas id="vmPreviewCanvas" width="1080" height="1920"></canvas>
+              <div class="bg-media-container" id="vmBgMediaContainer"></div>
+              <div class="canvas-overlay clickable vm-upload-zone" id="vmCanvasOverlay">
+                <div class="overlay-prompt" id="vmCanvasUploadPrompt">
+                  <i class="fa-solid fa-film animate-pulse"></i>
+                  <p class="main-prompt">Drop your Video File here</p>
+                  <p class="sub-prompt">Drag & drop or click — AI sync will NOT auto-start</p>
+                </div>
+                <div class="overlay-prompt hidden" id="vmCanvasLoadingPrompt">
+                  <div class="ai-loading-spinner" style="margin-bottom: 16px;"></div>
+                  <p class="main-prompt">Processing Video...</p>
+                  <p class="sub-prompt" id="vmCanvasLoadingSubText">Loading file</p>
+                </div>
+              </div>
+              <div class="hud-overlay" id="vmHudOverlay">
+                <div class="hud-circle">
+                  <i class="fa-solid fa-play" id="vmHudPlayIcon"></i>
+                  <i class="fa-solid fa-pause" id="vmHudPauseIcon" style="display: none;"></i>
+                </div>
+              </div>
+            </div>
+
+            <!-- VM Player Toolbar -->
+            <div class="player-toolbar" id="vmPlayerToolbar">
+              <button id="vmBtnPlayPause" class="toolbar-btn play-btn" disabled title="Play/Pause"><i class="fa-solid fa-play"></i></button>
+              <button id="vmBtnStop" class="toolbar-btn" disabled title="Stop"><i class="fa-solid fa-stop"></i></button>
+              <div class="toolbar-divider"></div>
+              <div class="volume-control-wrapper">
+                <button id="vmVolumeBtn" class="toolbar-btn" disabled><i class="fa-solid fa-volume-high" id="vmVolumeIcon"></i></button>
+                <input type="range" id="vmPlaybackVolume" min="0" max="1" step="0.05" value="0.8" class="toolbar-slider">
+              </div>
+              <div class="toolbar-divider"></div>
+              <div class="speed-control-wrapper">
+                <label for="vmPlaybackSpeed">Speed:</label>
+                <select id="vmPlaybackSpeed" class="toolbar-select">
+                  <option value="0.5">0.5x</option>
+                  <option value="0.75">0.75x</option>
+                  <option value="1.0" selected>1.0x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                </select>
+              </div>
+              <div class="toolbar-divider"></div>
+              <span id="vmTimeDisplay" style="font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--primary);">00:00.0 / 00:00.0</span>
+            </div>
+
+            <!-- VM Waveform (shared waveform target) -->
+            <div class="waveform-container" id="vmWaveformContainer" style="display: none;">
+              <div class="waveform-labels">
+                <span><i class="fa-solid fa-waveform"></i> Audio Track</span>
+                <span id="vmWaveformTimeLabel">00:00.0 / 00:00.0</span>
+              </div>
+              <div id="vmWaveformDiv"></div>
+            </div>
+
+            <!-- VM Export Section -->
+            <div class="export-section" id="vmExportSection">
+              <div class="export-header">
+                <h3><i class="fa-solid fa-video"></i> Render & Export</h3>
+              </div>
+              <div class="export-options-grid">
+                <div class="control-group">
+                  <label for="vmExportFormat">Export Format</label>
+                  <select id="vmExportFormat">
+                    <option value="composite" selected>Whole video with native audio and captions</option>
+                  </select>
+                  <select id="vmExportAudio" class="hidden">
+                    <option value="original" selected>Original Video Audio</option>
+                    <option value="silent">Muted (No Audio)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="export-actions">
+                <button id="vmBtnExportVideo" class="btn-primary" disabled><i class="fa-solid fa-circle-arrow-down"></i> Render Video</button>
+                <button id="vmBtnExportSRT" class="btn-secondary" disabled><i class="fa-solid fa-file-lines"></i> Export .SRT</button>
+              </div>
+              <div id="vmExportProgressContainer" class="hidden render-status-card">
+                <div class="progress-details">
+                  <span id="vmExportProgressLabel">Rendering...</span>
+                  <span id="vmExportProgressPct">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill" id="vmExportProgressFill" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- VM Right Panel: Video Sync Engine -->
+        <section class="panel right-panel glass-panel vm-panel" id="vmRightPanel">
+          <div class="panel-header">
+            <i class="fa-solid fa-clapperboard"></i>
+            <h2>Video Editor</h2>
+          </div>
+          <div class="panel-content scrollable" id="vmRightContent">
+
+            <!-- 1. Video File Upload Card -->
+            <div class="section-card" id="vmVideoFileCard">
+              <h3><i class="fa-solid fa-file-video"></i> Video File</h3>
+              <input type="file" id="vmVideoFileInput" accept="video/*" class="hidden">
+              <div id="vmVideoFileDetails" class="hidden file-details-box">
+                <span class="file-name" id="vmVideoFileName">video.mp4</span>
+                <span class="file-size" id="vmVideoFileSize">0.0 MB</span>
+                <button id="vmBtnRemoveVideo" class="remove-btn" title="Remove Video"><i class="fa-solid fa-times"></i></button>
+              </div>
+              <div id="vmVideoFileHint" class="vm-upload-hint">
+                <i class="fa-solid fa-film"></i>
+                <span>No video uploaded. AI sync will NOT auto-start on upload.</span>
+              </div>
+            </div>
+
+            <!-- 2. Script & Sync Engine -->
+            <div class="section-card" id="vmSyncCard">
+              <h3><i class="fa-solid fa-brain"></i> AI Caption Sync</h3>
+              <p class="transcript-hint">Paste your script below if you want exact spelling. AI will transcribe the uploaded video's native audio, and you can still correct caption text later without changing timings.</p>
+              <textarea id="vmPastedText" placeholder="Optional: paste your script here for exact spelling alignment..." style="margin-bottom: 10px;"></textarea>
+              <label class="custom-checkbox" style="margin-bottom: 12px;">
+                <input type="checkbox" id="vmChkAlignPastedText">
+                <span class="checkmark"></span>
+                Align to pasted text (exact spelling)
+              </label>
+              <button id="vmBtnRunAISync" class="sync-btn primary-sync" disabled>
+                <div class="sync-icon"><i class="fa-solid fa-brain"></i></div>
+                <div class="sync-info">
+                  <span class="sync-title">Run AI Sync (Manual)</span>
+                  <span class="sync-desc">Transcribe video/audio and generate captions</span>
+                </div>
+              </button>
+              <!-- Download Progress -->
+              <div id="vmModelDownloadProgress" class="hidden download-progress-card" style="margin-top: 10px;">
+                <div class="progress-details">
+                  <span>Downloading AI Model...</span>
+                  <span id="vmModelProgressPercent">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill" id="vmModelProgressFill" style="width: 0%"></div>
+                </div>
+              </div>
+              <!-- AI Log -->
+              <div id="vmAiLogBox" class="hidden ai-log-box" style="margin-top: 10px;">
+                <div class="log-header">AI Sync Log:</div>
+                <div class="log-lines" id="vmAiLogLines"><div>Waiting...</div></div>
+              </div>
+            </div>
+
+            <!-- 3. Timeline Clip Tools -->
+            <div class="section-card" id="vmClipToolsCard">
+              <h3><i class="fa-solid fa-scissors"></i> Clip Tools</h3>
+              <div class="sync-actions-stack">
+                <button id="vmBtnSplitClip" class="action-btn" disabled>
+                  <i class="fa-solid fa-scissors"></i> Split at Playhead
+                </button>
+                <button id="vmBtnDeleteClip" class="action-btn" disabled>
+                  <i class="fa-solid fa-trash-can"></i> Delete Selected Clip
+                </button>
+              </div>
+            </div>
+
+            <!-- 4. Subtitle Editor -->
+            <div class="section-card transcript-editor-card" id="vmTranscriptEditorCard">
+              <h3><i class="fa-solid fa-list-check"></i> Subtitle Editor</h3>
+              <div style="margin-bottom: 8px; justify-content: flex-end; display: flex; gap: 8px;">
+                <button id="vmBtnAddWord" class="small-icon-btn" title="Add Word" disabled><i class="fa-solid fa-plus"></i></button>
+                <button id="vmBtnClearAllWords" class="small-icon-btn" title="Clear All" disabled><i class="fa-solid fa-trash"></i></button>
+              </div>
+              <p class="transcript-hint">Edit word spelling here or by double-clicking a word on the canvas. Text edits do not change that word's timing unless you manually edit IN or OUT.</p>
+              <div class="word-timeline-list" id="vmWordTimelineList">
+                <div class="empty-transcript-placeholder">
+                  <i class="fa-solid fa-quote-left"></i>
+                  <p>No synced subtitles yet.</p>
+                  <p>Run AI Sync to generate captions.</p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </div>
+      <!-- END VIDEO MODE LAYOUT -->
+
       <!-- MOBILE LAYOUT -->
       <div class="mobile-layout hidden" id="mobileLayout">
         <aside class="sidebar-container glass-panel">
           <!-- Icon Tab Menu -->
           <nav class="sidebar-tabs">
-            <button class="tab-btn active" data-tab="media" title="Upload Media & Backgrounds">
+            <button class="tab-btn active" data-tab="media" title="Upload Narration Audio">
               <i class="fa-solid fa-folder-open"></i>
               <span>Media</span>
             </button>
-            <button class="tab-btn" data-tab="voice" title="Voiceover & Sync Engine">
+            <button class="tab-btn" data-tab="voice" title="Voiceover & Caption Sync">
               <i class="fa-solid fa-microphone-lines"></i>
               <span>Voice & Sync</span>
             </button>

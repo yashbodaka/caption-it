@@ -76,6 +76,28 @@ const state = {
   tts: {
     modelReady: false,
     isGenerating: false
+  },
+
+  // App mode: 'caption' | 'video'
+  appMode: 'caption',
+
+  // Video Mode independent state
+  videoMode: {
+    videoFile: null,
+    videoObjectUrl: null,
+    videoBuffer: null,
+    videoDuration: 0,
+    videoBgElement: null,      // <video> element for preview
+    attachedAudio: null,       // { file, buffer, objectUrl } or null
+    muteOriginal: false,
+    captions: [],
+    clips: [],
+    selectedClipId: null,
+    isPlaying: false,
+    currentTime: 0,
+    aspectRatio: '9:16',
+    rawWhisperChunks: null,
+    isExporting: false
   }
 };
 
@@ -168,10 +190,11 @@ const el = {
   btnClearAllWords: document.getElementById('btnClearAllWords'),
 
   // Video Exporter
-  exportFormat: document.getElementById('exportFormat') || { value: 'composite' },
-  exportAudio: document.getElementById('exportAudio') || { value: 'include' },
+  exportFormat: document.getElementById('exportFormat') || { value: 'webm-transparent' },
+  exportAudio: document.getElementById('exportAudio') || { value: 'silent' },
   btnExportVideo: document.getElementById('btnExportVideo'),
   btnExportSRT: document.getElementById('btnExportSRT'),
+  btnSendToVideoMode: document.getElementById('btnSendToVideoMode'),
   btnExportVideoMobile: document.getElementById('btnExportVideoMobile'),
   btnExportSRTMobile: document.getElementById('btnExportSRTMobile'),
   btnExportToggle: document.getElementById('btnExportToggle'),
@@ -217,7 +240,78 @@ const el = {
   ttsProgressPercent: document.getElementById('ttsProgressPercent'),
   ttsProgressFill: document.getElementById('ttsProgressFill'),
   ttsStatus: document.getElementById('ttsStatus'),
-  ttsLogLines: document.getElementById('ttsLogLines')
+  ttsLogLines: document.getElementById('ttsLogLines'),
+
+  // ——— VIDEO MODE elements ———
+  videoModeLayout: document.getElementById('videoModeLayout'),
+  desktopLayout: document.getElementById('desktopLayout'),
+  btnCaptionMode: document.getElementById('btnCaptionMode'),
+  btnVideoMode: document.getElementById('btnVideoMode'),
+
+  // VM Canvas
+  vmCanvasViewport: document.getElementById('vmCanvasViewport'),
+  vmPreviewCanvas: document.getElementById('vmPreviewCanvas'),
+  vmBgMediaContainer: document.getElementById('vmBgMediaContainer'),
+  vmCanvasOverlay: document.getElementById('vmCanvasOverlay'),
+  vmCanvasUploadPrompt: document.getElementById('vmCanvasUploadPrompt'),
+  vmCanvasLoadingPrompt: document.getElementById('vmCanvasLoadingPrompt'),
+  vmCanvasLoadingSubText: document.getElementById('vmCanvasLoadingSubText'),
+
+  // VM Player
+  vmBtnPlayPause: document.getElementById('vmBtnPlayPause'),
+  vmBtnStop: document.getElementById('vmBtnStop'),
+  vmPlaybackVolume: document.getElementById('vmPlaybackVolume'),
+  vmPlaybackSpeed: document.getElementById('vmPlaybackSpeed'),
+  vmTimeDisplay: document.getElementById('vmTimeDisplay'),
+  vmBtnAspectPortrait: document.getElementById('vmBtnAspectPortrait'),
+  vmBtnAspectLandscape: document.getElementById('vmBtnAspectLandscape'),
+
+  // VM File upload
+  vmVideoFileInput: document.getElementById('vmVideoFileInput'),
+  vmVideoFileDetails: document.getElementById('vmVideoFileDetails'),
+  vmVideoFileName: document.getElementById('vmVideoFileName'),
+  vmVideoFileSize: document.getElementById('vmVideoFileSize'),
+  vmBtnRemoveVideo: document.getElementById('vmBtnRemoveVideo'),
+  vmVideoFileHint: document.getElementById('vmVideoFileHint'),
+
+  // VM Audio Attach
+  vmAudioAttachInput: document.getElementById('vmAudioAttachInput'),
+  vmAttachedAudioDetails: document.getElementById('vmAttachedAudioDetails'),
+  vmAttachedAudioName: document.getElementById('vmAttachedAudioName'),
+  vmAttachedAudioSize: document.getElementById('vmAttachedAudioSize'),
+  vmBtnRemoveAttachedAudio: document.getElementById('vmBtnRemoveAttachedAudio'),
+  vmBtnAttachAudio: document.getElementById('vmBtnAttachAudio'),
+  vmAudioBadge: document.getElementById('vmAudioBadge'),
+  vmMuteOriginalAudio: document.getElementById('vmMuteOriginalAudio'),
+
+  // VM Sync
+  vmBtnRunAISync: document.getElementById('vmBtnRunAISync'),
+  vmPastedText: document.getElementById('vmPastedText'),
+  vmChkAlignPastedText: document.getElementById('vmChkAlignPastedText'),
+  vmModelDownloadProgress: document.getElementById('vmModelDownloadProgress'),
+  vmModelProgressPercent: document.getElementById('vmModelProgressPercent'),
+  vmModelProgressFill: document.getElementById('vmModelProgressFill'),
+  vmAiLogBox: document.getElementById('vmAiLogBox'),
+  vmAiLogLines: document.getElementById('vmAiLogLines'),
+
+  // VM Clip Tools
+  vmBtnSplitClip: document.getElementById('vmBtnSplitClip'),
+  vmBtnDeleteClip: document.getElementById('vmBtnDeleteClip'),
+
+  // VM Subtitle Editor
+  vmWordTimelineList: document.getElementById('vmWordTimelineList'),
+  vmBtnAddWord: document.getElementById('vmBtnAddWord'),
+  vmBtnClearAllWords: document.getElementById('vmBtnClearAllWords'),
+
+  // VM Export
+  vmExportFormat: document.getElementById('vmExportFormat'),
+  vmExportAudio: document.getElementById('vmExportAudio') || { value: 'original' },
+  vmBtnExportVideo: document.getElementById('vmBtnExportVideo'),
+  vmBtnExportSRT: document.getElementById('vmBtnExportSRT'),
+  vmExportProgressContainer: document.getElementById('vmExportProgressContainer'),
+  vmExportProgressLabel: document.getElementById('vmExportProgressLabel'),
+  vmExportProgressPct: document.getElementById('vmExportProgressPct'),
+  vmExportProgressFill: document.getElementById('vmExportProgressFill'),
 };
 
 // Canvas rendering context
@@ -377,7 +471,8 @@ function initResponsiveLayout() {
     const mobileTimelineSection = document.getElementById('mobileTimelineSection');
     
     if (isDesktop) {
-      desktopLayout.classList.remove('hidden');
+      desktopLayout.classList.toggle('hidden', state.appMode !== 'caption');
+      el.videoModeLayout?.classList.toggle('hidden', state.appMode !== 'video');
       mobileLayout.classList.add('hidden');
       
       // Hide the redundant static waveform card on desktop resolutions
@@ -392,6 +487,9 @@ function initResponsiveLayout() {
         leftContent.appendChild(document.getElementById('styleTypographyCard'));
         leftContent.appendChild(document.getElementById('styleColorsCard'));
         leftContent.appendChild(document.getElementById('styleLayoutCard'));
+      }
+      if (state.appMode === 'video') {
+        vmMoveStylePanel(document.getElementById('vmLeftContent'));
       }
       
       // Move preview stage elements and timeline container to desktop center content
@@ -431,8 +529,12 @@ function initResponsiveLayout() {
         wavesurfer.zoom(PIXELS_PER_SECOND);
       }
     } else {
+      state.appMode = 'caption';
       desktopLayout.classList.add('hidden');
+      el.videoModeLayout?.classList.add('hidden');
       mobileLayout.classList.remove('hidden');
+      el.btnCaptionMode?.classList.add('active');
+      el.btnVideoMode?.classList.remove('active');
       
       if (desktopWaveformParent) {
         desktopWaveformParent.classList.remove('hidden');
@@ -616,11 +718,11 @@ function setupEventListeners() {
     });
   });
 
-  el.btnUploadBg.addEventListener('click', () => {
-    el.bgFileInput.click();
+  el.btnUploadBg?.addEventListener('click', () => {
+    el.bgFileInput?.click();
   });
 
-  el.bgFileInput.addEventListener('change', handleBgUpload);
+  el.bgFileInput?.addEventListener('change', handleBgUpload);
 
   // Audio Upload Handlers bound to main canvas viewport overlay
   el.canvasOverlay.addEventListener('click', () => {
@@ -649,7 +751,7 @@ function setupEventListeners() {
     if (!el.canvasLoadingPrompt.classList.contains('hidden')) return;
 
     const file = e.dataTransfer.files[0];
-    if (file && (file.type.startsWith('audio/') || file.type.startsWith('video/'))) {
+    if (file && file.type.startsWith('audio/')) {
       handleAudioFile(file);
     }
   });
@@ -746,6 +848,7 @@ function setupEventListeners() {
   // Exporters
   el.btnExportVideo.addEventListener('click', startExportingSubtitlesVideo);
   el.btnExportSRT.addEventListener('click', downloadSRTFile);
+  el.btnSendToVideoMode?.addEventListener('click', transferCaptionsToVideoMode);
   el.btnExportVideoMobile?.addEventListener('click', startExportingSubtitlesVideo);
   el.btnExportSRTMobile?.addEventListener('click', downloadSRTFile);
 
@@ -1055,7 +1158,7 @@ function updateStatusIndicator() {
       el.statusText.textContent = 'Local AI Failed';
     } else {
       el.statusDot.classList.add('idle');
-      el.statusText.textContent = 'Local AI Offline';
+      el.statusText.textContent = 'AI Model Offline';
     }
   } else {
     const isConfigured = (state.api.provider === 'gemini' && state.api.geminiKey) || 
@@ -1579,6 +1682,11 @@ function resetUploadPrompt() {
 
 // --- Upload Handlers ---
 function handleAudioFile(file) {
+  if (!file || !file.type.startsWith('audio/')) {
+    alert('Caption Mode accepts audio files only. Upload your video later in Video Mode.');
+    return;
+  }
+
   state.audioFile = file;
   
   // Update UI file status
@@ -1594,29 +1702,6 @@ function handleAudioFile(file) {
   const objectUrl = URL.createObjectURL(file);
   wavesurfer.load(objectUrl);
 
-  // If a video file is uploaded, automatically load it as background media
-  const isVideo = file.type.startsWith('video/');
-  if (isVideo) {
-    if (state.bgMediaElement && typeof state.bgMediaElement.pause === 'function') {
-      state.bgMediaElement.pause();
-    }
-    if (el.bgMediaContainer) {
-      el.bgMediaContainer.innerHTML = '';
-      
-      const video = document.createElement('video');
-      video.src = objectUrl;
-      video.muted = true; // Muted since Wavesurfer will play the audio track
-      video.playsInline = true;
-      video.style.width = '100%';
-      video.style.height = '100%';
-      video.style.objectFit = 'cover';
-      
-      el.bgMediaContainer.appendChild(video);
-      state.bgType = 'custom';
-      state.bgMediaElement = video;
-    }
-  }
-
   // Decode audio data to extract Float32Array for local Whisper model
   const reader = new FileReader();
   reader.onload = async (e) => {
@@ -1630,7 +1715,6 @@ function handleAudioFile(file) {
       state.audioDuration = decodedBuffer.duration;
 
       // Initialize default single clip covering the entire media file
-      const isVideo = state.audioFile && state.audioFile.type.startsWith('video/');
       state.clips = [
         {
           id: 'clip-1',
@@ -1638,17 +1722,10 @@ function handleAudioFile(file) {
           sourceEnd: state.audioDuration,
           timelineStart: 0,
           timelineEnd: state.audioDuration,
-          type: isVideo ? 'video' : 'audio'
+          type: 'audio'
         }
       ];
       state.selectedClipId = 'clip-1';
-
-      if (isVideo) {
-        generateClipThumbnails(state.clips[0], objectUrl).then(thumbs => {
-          state.clips[0].thumbnails = thumbs;
-          renderTimelineVideoTrack();
-        });
-      }
 
       const trackWidth = state.audioDuration * PIXELS_PER_SECOND;
       if (el.timelineTracksWidthWrapper) {
@@ -1705,7 +1782,7 @@ function removeAudioFile() {
   state.audioFile = null;
   state.audioBuffer = null;
   state.audioDuration = 0;
-  
+
   if (state.bgMediaElement) {
     if (typeof state.bgMediaElement.pause === 'function') state.bgMediaElement.pause();
     state.bgMediaElement = null;
@@ -1742,6 +1819,33 @@ function removeAudioFile() {
   renderTimelineVideoTrack();
   renderTimelineRuler();
   drawCanvas(0);
+}
+
+function transferCaptionsToVideoMode() {
+  if (!state.captions.length) return;
+
+  state.videoMode.captions = state.captions.map((cap, index) => ({
+    id: index + 1,
+    word: cap.word,
+    start: parseFloat(cap.start.toFixed(3)),
+    end: parseFloat(cap.end.toFixed(3)),
+    sourceStart: cap.sourceStart ?? cap.start,
+    sourceEnd: cap.sourceEnd ?? cap.end
+  }));
+  state.videoMode.rawWhisperChunks = null;
+
+  vmRenderSubtitleEditor();
+  vmDrawCanvas(state.videoMode.currentTime || 0);
+  if (el.vmBtnExportSRT) el.vmBtnExportSRT.removeAttribute('disabled');
+  if (el.vmBtnAddWord) el.vmBtnAddWord.removeAttribute('disabled');
+  if (el.vmBtnClearAllWords) el.vmBtnClearAllWords.removeAttribute('disabled');
+
+  switchMode('video');
+
+  if (!state.videoMode.videoFile) {
+    vmShowUploadPrompt();
+    vmAddLogLine('Captions imported from Caption Mode. Upload a video to continue in Video Mode.');
+  }
 }
 
 async function handleBgUpload(e) {
@@ -2335,6 +2439,7 @@ function finishTapSync() {
 function enableExporters() {
   el.btnExportVideo?.removeAttribute('disabled');
   el.btnExportSRT?.removeAttribute('disabled');
+  el.btnSendToVideoMode?.removeAttribute('disabled');
   el.btnExportVideoMobile?.removeAttribute('disabled');
   el.btnExportSRTMobile?.removeAttribute('disabled');
   el.btnExportToggle?.removeAttribute('disabled');
@@ -2343,6 +2448,7 @@ function enableExporters() {
 function disableExporters() {
   el.btnExportVideo?.setAttribute('disabled', 'true');
   el.btnExportSRT?.setAttribute('disabled', 'true');
+  el.btnSendToVideoMode?.setAttribute('disabled', 'true');
   el.btnExportVideoMobile?.setAttribute('disabled', 'true');
   el.btnExportSRTMobile?.setAttribute('disabled', 'true');
   el.btnExportToggle?.setAttribute('disabled', 'true');
@@ -2436,7 +2542,7 @@ function renderSubtitleEditor() {
     placeholder.innerHTML = `
       <i class="fa-solid fa-quote-left"></i>
       <p>No synced subtitles yet.</p>
-      <p>Run the AI Sync or use the Tap-to-Sync studio above to generate synchronized captions.</p>
+      <p>Upload narration audio, generate a voiceover, or run sync to generate captions.</p>
     `;
     el.wordTimelineList.appendChild(placeholder);
     return;
@@ -2860,39 +2966,10 @@ function drawCanvas(time) {
 
   // Background Compositing logic for Exporting or preview solid colors
   const isExporting = state.isExporting;
-  const exportFormat = el.exportFormat ? el.exportFormat.value : '';
+  const exportFormat = el.exportFormat ? el.exportFormat.value : 'webm-transparent';
 
-  if (isExporting) {
-    if (exportFormat === 'webm-green' || exportFormat === 'mp4-green') {
-      ctx.fillStyle = '#00ff00';
-      ctx.fillRect(0, 0, w, h);
-    } else if (exportFormat === 'webm-black') {
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, w, h);
-    } else if (exportFormat === 'composite') {
-      if (state.bgType === 'custom' && state.bgMediaElement) {
-        try {
-          ctx.drawImage(state.bgMediaElement, 0, 0, w, h);
-        } catch (e) {
-          console.warn("Could not draw background media frame on export:", e);
-        }
-      } else if (state.bgType === 'green') {
-        ctx.fillStyle = '#00ff00';
-        ctx.fillRect(0, 0, w, h);
-      } else if (state.bgType === 'black') {
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, w, h);
-      }
-    }
-  } else {
-    // During preview, render solid color backgrounds on canvas if selected
-    if (state.bgType === 'green') {
-      ctx.fillStyle = '#00ff00';
-      ctx.fillRect(0, 0, w, h);
-    } else if (state.bgType === 'black') {
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, w, h);
-    }
+  if (isExporting && exportFormat !== 'webm-transparent') {
+    ctx.clearRect(0, 0, w, h);
   }
 
   if (state.captions.length === 0) return;
@@ -3393,18 +3470,6 @@ async function startExportingSubtitlesVideo() {
   const format = el.exportFormat.value;
   let mimeType = 'video/webm;codecs=vp9'; // Default WebM with transparency support
   let extension = 'webm';
-
-  if (format === 'mp4-green') {
-    mimeType = 'video/webm';
-    extension = 'webm';
-    alert("Notice: Browsers natively export high-quality WebM. For 'MP4 Green Screen', we are rendering a Green Screen WebM file which you can import directly into Premiere/CapCut. You will have full chroma key support!");
-  } else if (format === 'webm-green') {
-    mimeType = 'video/webm';
-    extension = 'webm';
-  } else if (format === 'webm-black') {
-    mimeType = 'video/webm';
-    extension = 'webm';
-  }
 
   const origVol = wavesurfer.getVolume();
   wavesurfer.setVolume(0); // Mute wavesurfer so it doesn't double-play with our audioSource
@@ -4040,6 +4105,1247 @@ function spawnCanvasTextInput(wordObj, wordIndex, left, top, width, height) {
   });
 }
 
-// Apply default styling preset initially
+// =============================================================================
+// VIDEO MODE — Complete Independent Module
+// =============================================================================
+
+// Dedicated WaveSurfer instance for Video Mode
+let vmWavesurfer = null;
+// VM canvas 2d context
+let vmCtx = null;
+// VM render loop
+let vmRafId = null;
+
+// --- Mode Switching ---
+function switchMode(mode) {
+  if (mode !== 'caption' && mode !== 'video') return;
+  state.appMode = mode;
+
+  const captionLayout = document.getElementById('desktopLayout');
+  const videoLayout = el.videoModeLayout;
+  const mobileLayout = document.getElementById('mobileLayout');
+
+  if (window.innerWidth < 992) {
+    state.appMode = 'caption';
+    captionLayout?.classList.add('hidden');
+    videoLayout?.classList.add('hidden');
+    mobileLayout?.classList.remove('hidden');
+    el.btnCaptionMode?.classList.add('active');
+    el.btnVideoMode?.classList.remove('active');
+    if (el.btnSplitClip?.parentElement) el.btnSplitClip.parentElement.hidden = true;
+    return;
+  }
+
+  if (mode === 'caption') {
+    captionLayout?.classList.remove('hidden');
+    videoLayout?.classList.add('hidden');
+    el.btnCaptionMode?.classList.add('active');
+    el.btnVideoMode?.classList.remove('active');
+    if (el.btnSplitClip?.parentElement) el.btnSplitClip.parentElement.hidden = true;
+    vmMoveStylePanel(document.getElementById('desktopLeftContent'));
+  } else {
+    captionLayout?.classList.add('hidden');
+    videoLayout?.classList.remove('hidden');
+    el.btnCaptionMode?.classList.remove('active');
+    el.btnVideoMode?.classList.add('active');
+    if (el.btnSplitClip?.parentElement) el.btnSplitClip.parentElement.hidden = false;
+
+    // Initialize VM canvas context on first switch
+    if (!vmCtx && el.vmPreviewCanvas) {
+      vmCtx = el.vmPreviewCanvas.getContext('2d');
+      vmDrawCanvas(0);
+    }
+
+    // Mirror caption style panel into VM left panel
+    vmMoveStylePanel(document.getElementById('vmLeftContent'));
+
+    // Initialize vmWavesurfer if not yet done
+    if (!vmWavesurfer) {
+      setupVmWaveSurfer();
+    }
+  }
+}
+
+// Mirror the style panel contents into VM left panel
+function vmMoveStylePanel(target) {
+  if (!target) return;
+  // Clear placeholder
+  const hint = target.querySelector('.vm-placeholder-hint');
+  if (hint) hint.remove();
+
+  // Reference the same style cards (they are shared DOM nodes)
+  const styleCards = [
+    document.getElementById('stylePresetsCard'),
+    document.getElementById('styleTypographyCard'),
+    document.getElementById('styleColorsCard'),
+    document.getElementById('styleLayoutCard')
+  ].filter(Boolean);
+
+  styleCards.forEach(card => {
+    if (card.parentElement !== target) {
+      target.appendChild(card);
+    }
+  });
+}
+
+// --- VM WaveSurfer ---
+function setupVmWaveSurfer() {
+  if (typeof WaveSurfer === 'undefined') {
+    vmAddLogLine('[WARNING] WaveSurfer unavailable. Audio playback disabled in Video Mode.');
+    vmWavesurfer = { ...wavesurferMock };
+    return;
+  }
+
+  const primary = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#ff7597';
+  const secondary = getComputedStyle(document.documentElement).getPropertyValue('--secondary').trim() || '#00f0ff';
+
+  try {
+    vmWavesurfer = WaveSurfer.create({
+      container: '#vmWaveformDiv',
+      waveColor: 'rgba(142, 142, 159, 0.3)',
+      progressColor: secondary,
+      cursorColor: primary,
+      cursorWidth: 2,
+      barWidth: 2,
+      barGap: 3,
+      height: 48,
+      fillParent: true,
+      interact: true
+    });
+
+    const safeMethods = ['getCurrentTime', 'getDuration', 'play', 'pause', 'stop', 'setTime', 'setVolume', 'setPlaybackRate'];
+    safeMethods.forEach(method => {
+      if (typeof vmWavesurfer[method] === 'function') {
+        const original = vmWavesurfer[method].bind(vmWavesurfer);
+        vmWavesurfer[method] = (...args) => {
+          try { return original(...args); } catch (e) {
+            if (method === 'getCurrentTime' || method === 'getDuration') return 0;
+            return null;
+          }
+        };
+      }
+    });
+
+    vmWavesurfer.on('timeupdate', (time) => {
+      if (state.videoMode.isPlaying) return;
+      state.videoMode.currentTime = time;
+      const dur = state.videoMode.videoDuration;
+      if (el.vmTimeDisplay) el.vmTimeDisplay.textContent = `${formatTime(time)} / ${formatTime(dur)}`;
+      vmDrawCanvas(time);
+      // Sync video element
+      if (state.videoMode.videoBgElement) {
+        if (Math.abs(state.videoMode.videoBgElement.currentTime - time) > 0.15) {
+          state.videoMode.videoBgElement.currentTime = time;
+        }
+      }
+    });
+
+    vmWavesurfer.on('play', () => {
+      state.videoMode.isPlaying = true;
+      if (el.vmBtnPlayPause) el.vmBtnPlayPause.innerHTML = '<i class="fa-solid fa-pause"></i>';
+      if (state.videoMode.videoBgElement) state.videoMode.videoBgElement.play().catch(() => {});
+      vmStartRenderLoop();
+    });
+
+    vmWavesurfer.on('pause', () => {
+      state.videoMode.isPlaying = false;
+      if (el.vmBtnPlayPause) el.vmBtnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i>';
+      if (state.videoMode.videoBgElement) state.videoMode.videoBgElement.pause();
+      vmStopRenderLoop();
+    });
+
+    vmWavesurfer.on('finish', () => {
+      state.videoMode.isPlaying = false;
+      if (el.vmBtnPlayPause) el.vmBtnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i>';
+      if (state.videoMode.videoBgElement) state.videoMode.videoBgElement.pause();
+      vmStopRenderLoop();
+    });
+
+    vmWavesurfer.on('ready', () => {
+      const waveformDuration = vmWavesurfer.getDuration();
+      const dur = state.videoMode.videoDuration || waveformDuration;
+      if (el.vmTimeDisplay) el.vmTimeDisplay.textContent = `00:00.0 / ${formatTime(dur)}`;
+      if (el.vmWaveformContainer) el.vmWaveformContainer.style.display = '';
+    });
+
+  } catch(err) {
+    console.error('VM WaveSurfer init failed:', err);
+    vmWavesurfer = { ...wavesurferMock };
+  }
+}
+
+// --- VM Render Loop ---
+function vmStartRenderLoop() {
+  vmStopRenderLoop();
+  const step = () => {
+    if (!state.videoMode.isPlaying) return;
+    const time = vmWavesurfer ? vmWavesurfer.getCurrentTime() : 0;
+    state.videoMode.currentTime = time;
+    const dur = state.videoMode.videoDuration;
+    if (el.vmTimeDisplay) el.vmTimeDisplay.textContent = `${formatTime(time)} / ${formatTime(dur)}`;
+    vmDrawCanvas(time);
+    vmRafId = requestAnimationFrame(step);
+  };
+  vmRafId = requestAnimationFrame(step);
+}
+
+function vmStopRenderLoop() {
+  if (vmRafId) {
+    cancelAnimationFrame(vmRafId);
+    vmRafId = null;
+  }
+}
+
+// --- VM Canvas Drawing (reuses main drawCanvas logic with VM canvas) ---
+function vmDrawCanvas(time) {
+  if (!vmCtx || !el.vmPreviewCanvas) return;
+
+  const canvas = el.vmPreviewCanvas;
+  const w = canvas.width;
+  const h = canvas.height;
+
+  vmCtx.clearRect(0, 0, w, h);
+
+  // Draw background
+  const bgType = state.bgType;
+  if (bgType === 'green') {
+    vmCtx.fillStyle = '#00ff00';
+    vmCtx.fillRect(0, 0, w, h);
+  } else if (bgType === 'black') {
+    vmCtx.fillStyle = '#000000';
+    vmCtx.fillRect(0, 0, w, h);
+  } else if (bgType === 'grid') {
+    vmCtx.fillStyle = 'rgba(100,100,100,0.08)';
+    vmCtx.fillRect(0, 0, w, h);
+    const gridSize = 40;
+    vmCtx.strokeStyle = 'rgba(180,180,180,0.15)';
+    vmCtx.lineWidth = 1;
+    for (let x = 0; x <= w; x += gridSize) {
+      vmCtx.beginPath();
+      vmCtx.moveTo(x, 0);
+      vmCtx.lineTo(x, h);
+      vmCtx.stroke();
+    }
+    for (let y = 0; y <= h; y += gridSize) {
+      vmCtx.beginPath();
+      vmCtx.moveTo(0, y);
+      vmCtx.lineTo(w, y);
+      vmCtx.stroke();
+    }
+  }
+
+  // Draw video frame from bg element if available
+  if (state.videoMode.videoBgElement && state.videoMode.videoBgElement.tagName === 'VIDEO') {
+    try {
+      vmCtx.drawImage(state.videoMode.videoBgElement, 0, 0, w, h);
+    } catch(e) {}
+  }
+
+  // Draw captions using the shared drawCanvas caption logic style
+  vmDrawCaptions(time, w, h);
+}
+
+function vmDrawCaptions(time, w, h) {
+  const captions = state.videoMode.captions;
+  if (!captions || captions.length === 0) return;
+
+  const st = state.style;
+  const phrases = groupCaptionsIntoPhrases(captions, st.wordsPerLine);
+  const currentPhrase = phrases.find(p => time >= p.start && time <= p.end);
+  if (!currentPhrase) return;
+
+  const fontSizeScaled = st.fontSize * (w / 1080);
+  const fontSizeLetterSpacing = st.letterSpacing * (w / 1080);
+  const strokeWidthScaled = st.strokeWidth * (w / 1080);
+
+  let fontString = '';
+  if (st.textItalic) fontString += 'italic ';
+  fontString += `${st.fontWeight} ${fontSizeScaled}px "${st.fontFamily}"`;
+
+  vmCtx.save();
+  vmCtx.font = fontString;
+  vmCtx.textAlign = 'center';
+  vmCtx.textBaseline = 'middle';
+
+  const anchorY = h * (st.captionPosition / 100);
+  const lineHeight = fontSizeScaled * 1.35;
+  const maxTextWidth = w * 0.85;
+  const spacing = 32 * (w / 1080);
+
+  const words = currentPhrase.words;
+  const lines = [];
+  let currentLine = [];
+  let currentLineWidth = 0;
+
+  words.forEach(wd => {
+    let text = wd.word;
+    if (st.textUppercase) text = text.toUpperCase();
+    const wordWidth = vmCtx.measureText(text).width;
+    if (currentLine.length > 0 && currentLineWidth + spacing + wordWidth > maxTextWidth) {
+      lines.push({ words: currentLine, width: currentLineWidth });
+      currentLine = [wd];
+      currentLineWidth = wordWidth;
+    } else {
+      currentLineWidth = currentLine.length === 0 ? wordWidth : currentLineWidth + spacing + wordWidth;
+      currentLine.push(wd);
+    }
+  });
+  if (currentLine.length > 0) lines.push({ words: currentLine, width: currentLineWidth });
+
+  const totalBlockHeight = (lines.length - 1) * lineHeight;
+  const startY = anchorY - totalBlockHeight / 2;
+
+  lines.forEach((line, lineIdx) => {
+    const lineY = startY + lineIdx * lineHeight;
+    let lineStartX = (w - line.width) / 2;
+    if (st.textAlignment === 'left') lineStartX = w * 0.1;
+    if (st.textAlignment === 'right') lineStartX = w * 0.9 - line.width;
+
+    let currentX = lineStartX;
+    line.words.forEach(wd => {
+      let text = wd.word;
+      if (st.textUppercase) text = text.toUpperCase();
+      const wordWidth = vmCtx.measureText(text).width;
+      const isActive = time >= wd.start && time <= wd.end;
+      const wordColor = isActive ? st.highlightColor : st.textColor;
+
+      if (st.showBoxBg) {
+        const pad = (st.boxPadding || 12) * (w / 1080);
+        const alpha = (st.boxBgOpacity || 80) / 100;
+        vmCtx.fillStyle = hexToRgba(st.boxBgColor, alpha);
+        const br = (st.boxBorderRadius || 8) * (w / 1080);
+        const bx = currentX - pad;
+        const by = lineY - fontSizeScaled / 2 - pad;
+        const bw = wordWidth + pad * 2;
+        const bh = fontSizeScaled + pad * 2;
+        vmCtx.beginPath();
+        vmCtx.roundRect(bx, by, bw, bh, br);
+        vmCtx.fill();
+      }
+
+      if (strokeWidthScaled > 0) {
+        vmCtx.strokeStyle = st.strokeColor;
+        vmCtx.lineWidth = strokeWidthScaled;
+        vmCtx.lineJoin = 'round';
+        vmCtx.strokeText(text, currentX + wordWidth / 2, lineY);
+      }
+
+      if (st.shadowBlur > 0) {
+        vmCtx.shadowColor = st.shadowColor;
+        vmCtx.shadowBlur = st.shadowBlur * (w / 1080);
+      }
+
+      vmCtx.fillStyle = wordColor;
+      vmCtx.fillText(text, currentX + wordWidth / 2, lineY);
+      vmCtx.shadowBlur = 0;
+
+      currentX += wordWidth + spacing;
+    });
+  });
+
+  vmCtx.restore();
+}
+
+// --- VM Upload Handler (NO AUTO SYNC) ---
+async function handleVideoModeUpload(file) {
+  if (!file || !file.type.startsWith('video/')) {
+    alert('Please upload a valid video file (MP4, MOV, WebM, etc.)');
+    return;
+  }
+
+  state.videoMode.videoFile = file;
+
+  // Update file details UI
+  if (el.vmVideoFileDetails) el.vmVideoFileDetails.classList.remove('hidden');
+  if (el.vmVideoFileName) el.vmVideoFileName.textContent = file.name;
+  if (el.vmVideoFileSize) el.vmVideoFileSize.textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
+  if (el.vmVideoFileHint) el.vmVideoFileHint.classList.add('hidden');
+
+  // Show loading state on canvas
+  vmShowLoading('Loading video file...');
+
+  if (state.videoMode.videoObjectUrl) {
+    URL.revokeObjectURL(state.videoMode.videoObjectUrl);
+  }
+  const objectUrl = URL.createObjectURL(file);
+  state.videoMode.videoObjectUrl = objectUrl;
+
+  // Create video element for preview background
+  const videoEl = document.createElement('video');
+  videoEl.src = objectUrl;
+  videoEl.muted = true; // muted during preview by default
+  videoEl.playsInline = true;
+  videoEl.loop = false;
+
+  videoEl.onloadedmetadata = () => {
+    state.videoMode.videoBgElement = videoEl;
+    state.videoMode.videoDuration = videoEl.duration;
+
+    // Populate vmBgMediaContainer for canvas overlay preview
+    if (el.vmBgMediaContainer) {
+      el.vmBgMediaContainer.innerHTML = '';
+      const displayVideo = document.createElement('video');
+      displayVideo.src = objectUrl;
+      displayVideo.muted = true;
+      displayVideo.playsInline = true;
+      displayVideo.style.width = '100%';
+      displayVideo.style.height = '100%';
+      displayVideo.style.objectFit = 'cover';
+      el.vmBgMediaContainer.appendChild(displayVideo);
+    }
+  };
+
+  // Decode audio from video for wavesurfer
+  vmAddLogLine(`Loading video: ${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`);
+
+  // Initialize VM wavesurfer if not done
+  if (!vmWavesurfer) {
+    setupVmWaveSurfer();
+  }
+
+  vmWavesurfer.load(objectUrl);
+
+  // Decode audio buffer for AI sync
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await audioCtx.decodeAudioData(e.target.result.slice(0));
+      state.videoMode.videoBuffer = decoded;
+      state.videoMode.videoDuration = decoded.duration;
+
+      // Create default clip
+      state.videoMode.clips = [{
+        id: 'vmclip-1',
+        sourceStart: 0,
+        sourceEnd: decoded.duration,
+        timelineStart: 0,
+        timelineEnd: decoded.duration,
+        type: 'video'
+      }];
+      state.videoMode.selectedClipId = 'vmclip-1';
+
+      // Enable playback and sync buttons
+      if (el.vmBtnPlayPause) el.vmBtnPlayPause.removeAttribute('disabled');
+      if (el.vmBtnStop) el.vmBtnStop.removeAttribute('disabled');
+      if (el.vmBtnRunAISync) el.vmBtnRunAISync.removeAttribute('disabled');
+      if (el.vmBtnSplitClip) el.vmBtnSplitClip.removeAttribute('disabled');
+
+      vmHideLoading();
+      vmDrawCanvas(0);
+
+      vmAddLogLine(`Video loaded. Duration: ${decoded.duration.toFixed(2)}s. Click "Run AI Sync" to generate captions.`);
+    } catch(err) {
+      vmAddLogLine(`[ERROR] Could not decode video audio: ${err.message}`);
+      vmHideLoading();
+      // Still allow preview without audio buffer
+      if (el.vmBtnPlayPause) el.vmBtnPlayPause.removeAttribute('disabled');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// --- VM Audio Attach ---
+async function attachAudioTrack(file) {
+  if (!file || !file.type.startsWith('audio/')) {
+    alert('Please select a valid audio file (MP3, WAV, OGG, etc.)');
+    return;
+  }
+
+  vmAddLogLine(`Attaching audio track: ${file.name}`);
+
+  const objectUrl = URL.createObjectURL(file);
+
+  // Decode
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await audioCtx.decodeAudioData(e.target.result);
+
+      if (state.videoMode.attachedAudio?.objectUrl) {
+        URL.revokeObjectURL(state.videoMode.attachedAudio.objectUrl);
+      }
+      state.videoMode.attachedAudio = { file, buffer: decoded, objectUrl };
+
+      // Update UI
+      if (el.vmAttachedAudioDetails) el.vmAttachedAudioDetails.classList.remove('hidden');
+      if (el.vmAttachedAudioName) el.vmAttachedAudioName.textContent = file.name;
+      if (el.vmAttachedAudioSize) el.vmAttachedAudioSize.textContent = `${(file.size/1024/1024).toFixed(2)} MB`;
+      if (el.vmAudioBadge) el.vmAudioBadge.classList.remove('hidden');
+
+      // Reload vmWavesurfer with the attached audio
+      if (vmWavesurfer) {
+        vmWavesurfer.load(objectUrl);
+      }
+      if (state.videoMode.videoFile && el.vmBtnRunAISync) {
+        el.vmBtnRunAISync.removeAttribute('disabled');
+      }
+
+      vmAddLogLine(`Audio attached (${decoded.duration.toFixed(2)}s). This will be used for AI sync and export.`);
+    } catch(err) {
+      URL.revokeObjectURL(objectUrl);
+      vmAddLogLine(`[ERROR] Could not decode attached audio: ${err.message}`);
+      alert(`Could not decode audio: ${err.message}`);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function removeAttachedAudio() {
+  if (state.videoMode.attachedAudio?.objectUrl) {
+    URL.revokeObjectURL(state.videoMode.attachedAudio.objectUrl);
+  }
+  state.videoMode.attachedAudio = null;
+
+  if (el.vmAttachedAudioDetails) el.vmAttachedAudioDetails.classList.add('hidden');
+  if (el.vmAudioBadge) el.vmAudioBadge.classList.add('hidden');
+
+  // Revert wavesurfer to video audio if video exists
+  if (state.videoMode.videoFile && vmWavesurfer) {
+    vmWavesurfer.load(state.videoMode.videoObjectUrl);
+  }
+
+  vmAddLogLine('Attached audio removed. Reverting to video native audio.');
+}
+
+function vmRemoveVideo() {
+  if (state.videoMode.videoBgElement) {
+    state.videoMode.videoBgElement.pause();
+    state.videoMode.videoBgElement = null;
+  }
+  state.videoMode.videoFile = null;
+  if (state.videoMode.videoObjectUrl) {
+    URL.revokeObjectURL(state.videoMode.videoObjectUrl);
+    state.videoMode.videoObjectUrl = null;
+  }
+  state.videoMode.videoBuffer = null;
+  state.videoMode.videoDuration = 0;
+  state.videoMode.captions = [];
+  state.videoMode.clips = [];
+
+  if (el.vmVideoFileDetails) el.vmVideoFileDetails.classList.add('hidden');
+  if (el.vmVideoFileHint) el.vmVideoFileHint.classList.remove('hidden');
+  if (el.vmBgMediaContainer) el.vmBgMediaContainer.innerHTML = '';
+  if (el.vmBtnPlayPause) el.vmBtnPlayPause.setAttribute('disabled', 'true');
+  if (el.vmBtnStop) el.vmBtnStop.setAttribute('disabled', 'true');
+  if (el.vmBtnRunAISync) el.vmBtnRunAISync.setAttribute('disabled', 'true');
+  if (el.vmBtnExportVideo) el.vmBtnExportVideo.setAttribute('disabled', 'true');
+  if (el.vmBtnExportSRT) el.vmBtnExportSRT.setAttribute('disabled', 'true');
+
+  if (vmWavesurfer) {
+    vmWavesurfer.destroy();
+    vmWavesurfer = null;
+  }
+
+  vmShowUploadPrompt();
+  vmDrawCanvas(0);
+  vmRenderSubtitleEditor();
+}
+
+// --- VM Canvas Overlay Helpers ---
+function vmShowLoading(msg) {
+  if (el.vmCanvasOverlay) el.vmCanvasOverlay.classList.remove('hidden');
+  if (el.vmCanvasOverlay) el.vmCanvasOverlay.classList.remove('clickable');
+  if (el.vmCanvasUploadPrompt) el.vmCanvasUploadPrompt.classList.add('hidden');
+  if (el.vmCanvasLoadingPrompt) el.vmCanvasLoadingPrompt.classList.remove('hidden');
+  if (el.vmCanvasLoadingSubText) el.vmCanvasLoadingSubText.textContent = msg || 'Processing...';
+}
+
+function vmHideLoading() {
+  if (el.vmCanvasOverlay) el.vmCanvasOverlay.classList.add('hidden');
+  if (el.vmCanvasUploadPrompt) el.vmCanvasUploadPrompt.classList.add('hidden');
+  if (el.vmCanvasLoadingPrompt) el.vmCanvasLoadingPrompt.classList.add('hidden');
+}
+
+function vmShowUploadPrompt() {
+  if (el.vmCanvasOverlay) el.vmCanvasOverlay.classList.remove('hidden');
+  if (el.vmCanvasOverlay) el.vmCanvasOverlay.classList.add('clickable');
+  if (el.vmCanvasUploadPrompt) el.vmCanvasUploadPrompt.classList.remove('hidden');
+  if (el.vmCanvasLoadingPrompt) el.vmCanvasLoadingPrompt.classList.add('hidden');
+}
+
+// --- VM Log ---
+function vmAddLogLine(text) {
+  if (!el.vmAiLogBox || !el.vmAiLogLines) return;
+  el.vmAiLogBox.classList.remove('hidden');
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  el.vmAiLogLines.appendChild(line);
+  el.vmAiLogLines.scrollTop = el.vmAiLogLines.scrollHeight;
+}
+
+// --- VM Playback ---
+function vmTogglePlayback() {
+  if (!vmWavesurfer) return;
+  if (state.videoMode.isPlaying) {
+    vmWavesurfer.pause();
+  } else {
+    vmWavesurfer.play();
+  }
+}
+
+function vmStopPlayback() {
+  if (!vmWavesurfer) return;
+  vmWavesurfer.pause();
+  vmWavesurfer.setTime(0);
+  state.videoMode.currentTime = 0;
+  if (state.videoMode.videoBgElement) state.videoMode.videoBgElement.currentTime = 0;
+  vmDrawCanvas(0);
+}
+
+// --- VM AI Sync ---
+async function runVMAISync() {
+  const audioBuffer = state.videoMode.videoBuffer;
+  if (!audioBuffer) {
+    alert('Please upload a video file first.');
+    return;
+  }
+
+  vmAddLogLine('Starting AI sync in Video Mode...');
+  vmShowLoading('AI Transcribing...');
+
+  // Reuse the same Whisper AI worker — but route results to Video Mode state
+  state.videoMode.rawWhisperChunks = null;
+
+  // Temporarily override whisper output processor
+  if (state.workerFailed || !aiWorker) {
+    await runVMMainThreadTranscription(audioBuffer);
+  } else {
+    if (state.aiModelReady) {
+      await sendVMAudioForTranscription(audioBuffer);
+    } else {
+      vmAddLogLine('Loading AI model...');
+      // Store VM pending flag
+      window._vmPendingSync = audioBuffer;
+      aiWorker.postMessage({ type: 'load' });
+    }
+  }
+}
+
+async function sendVMAudioForTranscription(audioBuffer) {
+  vmAddLogLine('Downsampling video audio for AI...');
+  try {
+    const downsampled = await downsampleAudioBuffer(audioBuffer, 16000);
+    vmAddLogLine('Sending audio to AI worker...');
+
+    // Mark that the next AI result goes to VM
+    window._vmSyncPending = true;
+
+    aiWorker.postMessage({
+      type: 'transcribe',
+      data: { audio: downsampled, duration: audioBuffer.duration }
+    }, [downsampled.buffer]);
+  } catch(err) {
+    vmAddLogLine(`[ERROR] ${err.message}`);
+    vmHideLoading();
+  }
+}
+
+async function runVMMainThreadTranscription(audioBuffer) {
+  showAIOverlay('Video Mode — Loading AI...', 'Downloading Whisper model. Please wait...');
+  try {
+    if (!mainThreadTranscriber) {
+      updateAIOverlay('Importing AI library...', 5);
+      let mod;
+      try { mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2'); } catch(e) {
+        mod = await import('https://esm.sh/@xenova/transformers@2.17.2');
+      }
+      const { pipeline, env } = mod;
+      env.allowLocalModels = false;
+      env.useBrowserCache = true;
+      updateAIOverlay('Loading Whisper model...', 20);
+      mainThreadTranscriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+        progress_callback: (d) => {
+          if (d.status === 'progress') updateAIOverlay(`Downloading: ${Math.round(d.progress)}%`, 20 + d.progress * 0.6);
+        }
+      });
+      state.aiModelReady = true;
+    }
+    updateAIOverlay('Transcribing...', 85);
+    const audioData = await downsampleAudioBuffer(audioBuffer, 16000);
+    const options = { return_timestamps: 'word' };
+    if (audioBuffer.duration > 30) { options.chunk_length_s = 30; options.stride_length_s = 5; }
+    const result = await mainThreadTranscriber(audioData, options);
+    hideAIOverlay();
+    vmProcessWhisperOutput(result);
+  } catch(err) {
+    hideAIOverlay();
+    vmHideLoading();
+    vmAddLogLine(`[ERROR] ${err.message}`);
+    alert(`VM AI Sync failed: ${err.message}`);
+  }
+}
+
+function vmProcessWhisperOutput(result) {
+  vmAddLogLine(`Whisper output: "${result.text}"`);
+  let rawChunks = result.chunks || [];
+  if (rawChunks.length === 0 && result.text) {
+    rawChunks = [{ text: result.text, timestamp: [0, state.videoMode.videoDuration] }];
+  }
+  state.videoMode.rawWhisperChunks = rawChunks;
+  vmRealignCaptions();
+}
+
+function vmRealignCaptions() {
+  if (!state.videoMode.rawWhisperChunks) return;
+  const pastedText = el.vmPastedText?.value?.trim();
+  const transcribed = getWordLevelTimestamps(state.videoMode.rawWhisperChunks);
+
+  if (pastedText && el.vmChkAlignPastedText?.checked) {
+    state.videoMode.captions = alignPastedTextWithWordTimestamps(pastedText, transcribed);
+  } else {
+    state.videoMode.captions = transcribed.map((w, i) => ({
+      id: i + 1,
+      word: w.word,
+      start: parseFloat(w.start.toFixed(3)),
+      end: parseFloat(w.end.toFixed(3))
+    }));
+  }
+
+  vmOnCaptionsUpdated();
+}
+
+function vmOnCaptionsUpdated() {
+  vmRenderSubtitleEditor();
+  vmDrawCanvas(state.videoMode.currentTime);
+
+  // Enable export buttons
+  if (el.vmBtnExportVideo) el.vmBtnExportVideo.removeAttribute('disabled');
+  if (el.vmBtnExportSRT) el.vmBtnExportSRT.removeAttribute('disabled');
+  if (el.vmBtnAddWord) el.vmBtnAddWord.removeAttribute('disabled');
+  if (el.vmBtnClearAllWords) el.vmBtnClearAllWords.removeAttribute('disabled');
+
+  vmAddLogLine(`Captions generated: ${state.videoMode.captions.length} words.`);
+}
+
+// --- VM Subtitle Editor ---
+function vmRenderSubtitleEditor() {
+  const container = el.vmWordTimelineList;
+  if (!container) return;
+
+  const captions = state.videoMode.captions;
+  if (!captions || captions.length === 0) {
+    container.innerHTML = `
+      <div class="empty-transcript-placeholder">
+        <i class="fa-solid fa-quote-left"></i>
+        <p>No synced subtitles yet.</p>
+        <p>Run AI Sync to generate captions.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = '';
+  captions.forEach((cap, index) => {
+    const card = document.createElement('div');
+    card.className = 'word-edit-card';
+    card.id = `vm-edit-card-${index}`;
+
+    const startSec = parseFloat((cap.start || 0).toFixed(3));
+    const endSec = parseFloat((cap.end || 0).toFixed(3));
+
+    card.innerHTML = `
+      <span class="word-num">${index + 1}</span>
+      <input type="text" value="${cap.word || ''}" placeholder="word">
+      <div class="time-input-group">
+        <span>IN</span>
+        <input type="number" value="${startSec}" step="0.01" min="0">
+      </div>
+      <div class="time-input-group">
+        <span>OUT</span>
+        <input type="number" value="${endSec}" step="0.01" min="0">
+      </div>
+      <button class="word-card-delete" title="Delete word"><i class="fa-solid fa-trash"></i></button>
+    `;
+
+    const [wordInput, startInput, endInput] = card.querySelectorAll('input');
+
+    wordInput.addEventListener('change', () => {
+      captions[index].word = wordInput.value;
+      vmDrawCanvas(state.videoMode.currentTime);
+    });
+    startInput.addEventListener('change', () => {
+      captions[index].start = parseFloat(startInput.value);
+    });
+    endInput.addEventListener('change', () => {
+      captions[index].end = parseFloat(endInput.value);
+    });
+
+    card.querySelector('.word-card-delete').addEventListener('click', () => {
+      state.videoMode.captions.splice(index, 1);
+      vmRenderSubtitleEditor();
+      vmDrawCanvas(state.videoMode.currentTime);
+    });
+
+    card.addEventListener('click', () => {
+      if (vmWavesurfer && cap.start >= 0) {
+        vmWavesurfer.setTime(cap.start);
+      }
+    });
+
+    container.appendChild(card);
+  });
+}
+
+// --- VM Export ---
+function vmDownloadSRT() {
+  const captions = state.videoMode.captions;
+  if (!captions || captions.length === 0) {
+    alert('No captions to export.');
+    return;
+  }
+  const lines = captions.map((cap, i) => {
+    const toSRT = (s) => {
+      const h = Math.floor(s/3600).toString().padStart(2,'0');
+      const m = Math.floor((s%3600)/60).toString().padStart(2,'0');
+      const sec = Math.floor(s%60).toString().padStart(2,'0');
+      const ms = Math.round((s%1)*1000).toString().padStart(3,'0');
+      return `${h}:${m}:${sec},${ms}`;
+    };
+    return `${i+1}\n${toSRT(cap.start)} --> ${toSRT(cap.end)}\n${cap.word}\n`;
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (state.videoMode.videoFile?.name?.replace(/\.[^.]+$/, '') || 'captions') + '.srt';
+  a.click();
+}
+
+async function vmStartExport() {
+  if (state.videoMode.isExporting) return;
+  const captions = state.videoMode.captions;
+  if (!captions || captions.length === 0) {
+    alert('No captions to export. Run AI Sync first.');
+    return;
+  }
+
+  state.videoMode.isExporting = true;
+  if (el.vmBtnExportVideo) el.vmBtnExportVideo.setAttribute('disabled', 'true');
+  if (el.vmExportProgressContainer) el.vmExportProgressContainer.classList.remove('hidden');
+
+  const canvas = el.vmPreviewCanvas;
+  const format = el.vmExportFormat?.value || 'composite';
+  const audioSource = el.vmExportAudio?.value || 'original';
+
+  // Determine background for composite
+  let renderBg = format === 'composite';
+  let bgFill = null;
+
+  // Get audio
+  let audioBuffer = null;
+  if (audioSource === 'original' && state.videoMode.videoBuffer) {
+    audioBuffer = state.videoMode.videoBuffer;
+  }
+
+  const videoEl = state.videoMode.videoBgElement;
+  const duration = state.videoMode.videoDuration;
+  const fps = 30;
+  const totalFrames = Math.ceil(duration * fps);
+
+  // Encode video using MediaRecorder from canvas
+  const stream = canvas.captureStream(fps);
+  let mediaRecorder;
+  const chunks = [];
+
+  // Inject audio if needed
+  if (audioBuffer && audioSource !== 'silent') {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      const dest = audioCtx.createMediaStreamDestination();
+      source.connect(dest);
+      source.start(0);
+      dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+    } catch(e) {
+      vmAddLogLine('[WARNING] Could not attach audio to stream: ' + e.message);
+    }
+  }
+
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    ? 'video/webm;codecs=vp9,opus'
+    : 'video/webm';
+
+  try {
+    mediaRecorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 10000000
+    });
+  } catch(e) {
+    mediaRecorder = new MediaRecorder(stream);
+  }
+
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(chunks, { type: mimeType });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (state.videoMode.videoFile?.name?.replace(/\.[^.]+$/, '') || 'export') + '_captioned.webm';
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    state.videoMode.isExporting = false;
+    if (el.vmBtnExportVideo) el.vmBtnExportVideo.removeAttribute('disabled');
+    if (el.vmExportProgressContainer) el.vmExportProgressContainer.classList.add('hidden');
+    vmAddLogLine('Export complete!');
+  };
+
+  mediaRecorder.start();
+
+  // Seek video back to start
+  if (videoEl) { videoEl.currentTime = 0; videoEl.pause(); }
+
+  let frame = 0;
+  const renderFrame = async () => {
+    if (frame >= totalFrames) {
+      mediaRecorder.stop();
+      return;
+    }
+
+    const time = frame / fps;
+
+    // Update canvas
+    if (bgFill !== undefined && bgFill !== null) {
+      vmCtx.fillStyle = bgFill;
+      vmCtx.fillRect(0, 0, canvas.width, canvas.height);
+    } else if (format === 'webm-transparent') {
+      vmCtx.clearRect(0, 0, canvas.width, canvas.height);
+    } else if (renderBg && videoEl) {
+      // Composite: draw video frame
+      videoEl.currentTime = time;
+      await new Promise(r => { videoEl.onseeked = r; setTimeout(r, 100); });
+      vmCtx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    }
+
+    vmDrawCaptions(time, canvas.width, canvas.height);
+
+    const pct = Math.round((frame / totalFrames) * 100);
+    if (el.vmExportProgressLabel) el.vmExportProgressLabel.textContent = `Frame ${frame} / ${totalFrames}`;
+    if (el.vmExportProgressPct) el.vmExportProgressPct.textContent = `${pct}%`;
+    if (el.vmExportProgressFill) el.vmExportProgressFill.style.width = `${pct}%`;
+
+    frame++;
+    setTimeout(renderFrame, 1000 / fps);
+  };
+
+  await renderFrame();
+}
+
+// --- VM Event Listeners (attached during init) ---
+function setupVMEventListeners() {
+  // Mode switcher
+  el.btnCaptionMode?.addEventListener('click', () => switchMode('caption'));
+  el.btnVideoMode?.addEventListener('click', () => switchMode('video'));
+
+  // VM canvas overlay click to upload
+  el.vmCanvasOverlay?.addEventListener('click', () => {
+    if (el.vmCanvasLoadingPrompt?.classList.contains('hidden')) {
+      el.vmVideoFileInput?.click();
+    }
+  });
+
+  el.vmCanvasOverlay?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (el.vmCanvasLoadingPrompt?.classList.contains('hidden')) {
+      el.vmCanvasOverlay.style.borderColor = 'var(--primary)';
+    }
+  });
+
+  el.vmCanvasOverlay?.addEventListener('dragleave', () => {
+    el.vmCanvasOverlay.style.borderColor = '';
+  });
+
+  el.vmCanvasOverlay?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    el.vmCanvasOverlay.style.borderColor = '';
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) {
+      handleVideoModeUpload(file);
+    }
+  });
+
+  el.vmVideoFileInput?.addEventListener('change', (e) => {
+    if (e.target.files[0]) handleVideoModeUpload(e.target.files[0]);
+  });
+
+  el.vmBtnRemoveVideo?.addEventListener('click', vmRemoveVideo);
+
+  // VM canvas viewport click to play/pause
+  el.vmCanvasViewport?.addEventListener('click', (e) => {
+    if (el.vmCanvasOverlay && !el.vmCanvasOverlay.classList.contains('hidden')) return;
+    vmTogglePlayback();
+  });
+
+  // VM canvas double click to edit caption
+  el.vmPreviewCanvas?.addEventListener('dblclick', (e) => {
+    if (state.videoMode.captions.length === 0) return;
+    const rect = el.vmPreviewCanvas.getBoundingClientRect();
+    const clickX_c = (e.clientX - rect.left) * (el.vmPreviewCanvas.width / rect.width);
+    const clickY_c = (e.clientY - rect.top) * (el.vmPreviewCanvas.height / rect.height);
+
+    const w = el.vmPreviewCanvas.width;
+    const h = el.vmPreviewCanvas.height;
+    const st = state.style;
+    const phrases = groupCaptionsIntoPhrases(state.videoMode.captions, st.wordsPerLine);
+    const cur = phrases.find(p => state.videoMode.currentTime >= p.start && state.videoMode.currentTime <= p.end);
+    if (!cur) return;
+
+    const tempCtx = el.vmPreviewCanvas.getContext('2d');
+    tempCtx.save();
+    let fs = '';
+    if (st.textItalic) fs += 'italic ';
+    fs += `${st.fontWeight} ${st.fontSize * (w/1080)}px "${st.fontFamily}"`;
+    tempCtx.font = fs;
+
+    const fontSizeScaled = st.fontSize * (w / 1080);
+    const spacing = 32 * (w / 1080);
+    const maxW = w * 0.85;
+    const lines = [];
+    let curLine = [], curW = 0;
+
+    cur.words.forEach(wd => {
+      let text = wd.word;
+      if (st.textUppercase) text = text.toUpperCase();
+      const ww = tempCtx.measureText(text).width;
+      if (curLine.length > 0 && curW + spacing + ww > maxW) {
+        lines.push({ words: curLine, width: curW });
+        curLine = [wd]; curW = ww;
+      } else {
+        curW = curLine.length === 0 ? ww : curW + spacing + ww;
+        curLine.push(wd);
+      }
+    });
+    if (curLine.length > 0) lines.push({ words: curLine, width: curW });
+
+    const anchorY = h * (st.captionPosition / 100);
+    const lineH = fontSizeScaled * 1.35;
+    const startY = anchorY - ((lines.length - 1) * lineH) / 2;
+
+    let found = null, foundIdx = -1, foundRect = null;
+    lines.forEach((line, li) => {
+      if (found) return;
+      const lineY = startY + li * lineH;
+      let cx = st.textAlignment === 'center' ? (w - line.width) / 2
+             : st.textAlignment === 'left' ? w * 0.1
+             : w * 0.9 - line.width;
+      line.words.forEach(wd => {
+        if (found) return;
+        let text = wd.word;
+        if (st.textUppercase) text = text.toUpperCase();
+        const ww = tempCtx.measureText(text).width;
+        const pad = 20;
+        if (clickX_c >= cx - pad && clickX_c <= cx + ww + pad &&
+            clickY_c >= lineY - fontSizeScaled/2 - pad && clickY_c <= lineY + fontSizeScaled/2 + pad) {
+          found = wd;
+          foundIdx = state.videoMode.captions.indexOf(wd);
+          foundRect = { left: cx, top: lineY - fontSizeScaled/2, width: ww, height: fontSizeScaled };
+        }
+        cx += ww + spacing;
+      });
+    });
+
+    tempCtx.restore();
+
+    if (found && foundIdx !== -1 && foundRect) {
+      if (state.videoMode.isPlaying) vmTogglePlayback();
+      const vr = el.vmCanvasViewport.getBoundingClientRect();
+      const cL = (foundRect.left * rect.width / w) + (rect.left - vr.left);
+      const cT = (foundRect.top * rect.height / h) + (rect.top - vr.top);
+      const cW = foundRect.width * rect.width / w;
+      const cH = foundRect.height * rect.height / h;
+      // Reuse spawnCanvasTextInput but targeting VM canvas viewport and VM captions
+      spawnVMCanvasTextInput(found, foundIdx, cL, cT, cW, cH);
+    }
+  });
+
+  // VM playback
+  el.vmBtnPlayPause?.addEventListener('click', vmTogglePlayback);
+  el.vmBtnStop?.addEventListener('click', vmStopPlayback);
+
+  el.vmPlaybackVolume?.addEventListener('input', (e) => {
+    if (vmWavesurfer) vmWavesurfer.setVolume(parseFloat(e.target.value));
+  });
+
+  el.vmPlaybackSpeed?.addEventListener('change', (e) => {
+    if (vmWavesurfer) vmWavesurfer.setPlaybackRate(parseFloat(e.target.value));
+  });
+
+  // VM aspect ratio
+  el.vmBtnAspectPortrait?.addEventListener('click', () => {
+    state.videoMode.aspectRatio = '9:16';
+    el.vmBtnAspectPortrait.classList.add('active');
+    el.vmBtnAspectLandscape.classList.remove('active');
+    el.vmCanvasViewport.classList.add('portrait-mode');
+    el.vmCanvasViewport.classList.remove('landscape-mode');
+    if (el.vmPreviewCanvas) { el.vmPreviewCanvas.width = 1080; el.vmPreviewCanvas.height = 1920; }
+    vmCtx = el.vmPreviewCanvas?.getContext('2d');
+    vmDrawCanvas(state.videoMode.currentTime);
+  });
+
+  el.vmBtnAspectLandscape?.addEventListener('click', () => {
+    state.videoMode.aspectRatio = '16:9';
+    el.vmBtnAspectLandscape.classList.add('active');
+    el.vmBtnAspectPortrait.classList.remove('active');
+    el.vmCanvasViewport.classList.add('landscape-mode');
+    el.vmCanvasViewport.classList.remove('portrait-mode');
+    if (el.vmPreviewCanvas) { el.vmPreviewCanvas.width = 1920; el.vmPreviewCanvas.height = 1080; }
+    vmCtx = el.vmPreviewCanvas?.getContext('2d');
+    vmDrawCanvas(state.videoMode.currentTime);
+  });
+
+  // VM Sync
+  el.vmBtnRunAISync?.addEventListener('click', runVMAISync);
+  el.vmPastedText?.addEventListener('input', () => {
+    if (state.videoMode.rawWhisperChunks) vmRealignCaptions();
+  });
+  el.vmChkAlignPastedText?.addEventListener('change', () => {
+    if (state.videoMode.rawWhisperChunks) vmRealignCaptions();
+  });
+
+  // VM Subtitle Editor
+  el.vmBtnAddWord?.addEventListener('click', () => {
+    const time = state.videoMode.currentTime;
+    state.videoMode.captions.push({ id: Date.now(), word: 'NEW', start: time, end: time + 0.5 });
+    vmRenderSubtitleEditor();
+  });
+  el.vmBtnClearAllWords?.addEventListener('click', () => {
+    if (confirm('Clear all captions in Video Mode?')) {
+      state.videoMode.captions = [];
+      state.videoMode.rawWhisperChunks = null;
+      vmRenderSubtitleEditor();
+      vmDrawCanvas(0);
+    }
+  });
+
+  // VM Clip Tools
+  el.vmBtnSplitClip?.addEventListener('click', () => {
+    const time = state.videoMode.currentTime;
+    const clips = state.videoMode.clips;
+    const clipIdx = clips.findIndex(c => time >= c.timelineStart && time <= c.timelineEnd);
+    if (clipIdx < 0) return;
+    const clip = clips[clipIdx];
+    const relTime = clip.sourceStart + (time - clip.timelineStart);
+    const newClip1 = { ...clip, id: `vmclip-${Date.now()}a`, sourceEnd: relTime, timelineEnd: time };
+    const newClip2 = { ...clip, id: `vmclip-${Date.now()}b`, sourceStart: relTime, timelineStart: time };
+    clips.splice(clipIdx, 1, newClip1, newClip2);
+    state.videoMode.selectedClipId = newClip2.id;
+    vmAddLogLine(`Split clip at ${time.toFixed(2)}s`);
+  });
+
+  el.vmBtnDeleteClip?.addEventListener('click', () => {
+    if (!state.videoMode.selectedClipId) return;
+    state.videoMode.clips = state.videoMode.clips.filter(c => c.id !== state.videoMode.selectedClipId);
+    state.videoMode.selectedClipId = null;
+    vmAddLogLine('Clip deleted.');
+  });
+
+  // VM Export
+  el.vmBtnExportVideo?.addEventListener('click', vmStartExport);
+  el.vmBtnExportSRT?.addEventListener('click', vmDownloadSRT);
+
+}
+
+// VM inline caption text input (mirrors spawnCanvasTextInput but for VM)
+function spawnVMCanvasTextInput(wordObj, wordIndex, left, top, width, height) {
+  document.querySelectorAll('.canvas-text-input').forEach(e => e.remove());
+
+  const viewport = el.vmCanvasViewport;
+  if (!viewport) return;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'canvas-text-input';
+  input.value = wordObj.word;
+  input.style.left = `${left}px`;
+  input.style.top = `${top}px`;
+  input.style.width = `${Math.max(width, 80)}px`;
+  input.style.height = `${height}px`;
+  input.style.fontSize = `${Math.max(height * 0.7, 12)}px`;
+
+  viewport.style.position = 'relative';
+  viewport.appendChild(input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+  const commit = () => {
+    if (committed) return;
+    committed = true;
+    const val = input.value.trim();
+    if (val && val !== wordObj.word) {
+      wordObj.word = val;
+      vmOnCaptionsUpdated();
+    }
+    input.remove();
+  };
+  const cancel = () => { if (committed) return; committed = true; input.remove(); };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+  input.addEventListener('blur', commit);
+}
+
+// Patch the AI worker message handler to also route to VM when a VM sync is pending
+function patchWorkerForVM() {
+  if (!aiWorker) return;
+  const originalOnMessage = aiWorker.onmessage;
+  aiWorker.onmessage = (event) => {
+    const { status, result, error, progress, loaded, total, file, message } = event.data;
+    const vmWaiting = Boolean(window._vmSyncPending || window._vmPendingSync);
+
+    if (vmWaiting && status === 'success') {
+      window._vmSyncPending = false;
+      window._vmPendingSync = null;
+      vmHideLoading();
+      vmProcessWhisperOutput(result);
+      // Also update model progress for VM
+      if (el.vmModelProgressFill) el.vmModelProgressFill.style.width = '100%';
+      return;
+    }
+
+    if (vmWaiting && status === 'downloading') {
+      if (el.vmModelDownloadProgress) el.vmModelDownloadProgress.classList.remove('hidden');
+      const pct = Math.round(progress || 0);
+      if (el.vmModelProgressPercent) el.vmModelProgressPercent.textContent = `${pct}%`;
+      if (el.vmModelProgressFill) el.vmModelProgressFill.style.width = `${pct}%`;
+    }
+
+    if (vmWaiting && status === 'ready') {
+      if (el.vmModelDownloadProgress) el.vmModelDownloadProgress.classList.add('hidden');
+      state.aiModelReady = true;
+      if (window._vmPendingSync) {
+        const buf = window._vmPendingSync;
+        window._vmPendingSync = null;
+        sendVMAudioForTranscription(buf);
+      }
+      return;
+    }
+
+    if (vmWaiting && status === 'progress') {
+      vmAddLogLine(message || 'AI processing...');
+      return;
+    }
+
+    if (vmWaiting && status === 'error') {
+      window._vmSyncPending = false;
+      window._vmPendingSync = null;
+      vmHideLoading();
+      vmAddLogLine(`[WORKER ERROR] ${error || 'AI sync failed.'}`);
+      alert(`Video Mode AI Error: ${error || 'AI sync failed.'}`);
+      return;
+    }
+
+    // Call the original handler for caption mode
+    if (originalOnMessage) originalOnMessage(event);
+  };
+}
+
+// Apply init and default preset
 init();
 applyStylePreset('classic_bold');
+setupVMEventListeners();
+switchMode(state.appMode);
+// Patch worker after init (which calls initWorker and sets aiWorker)
+patchWorkerForVM();
