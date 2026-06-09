@@ -2569,11 +2569,21 @@ function renderTimelineWords() {
     span.textContent = cap.word;
     block.appendChild(span);
     
-    // Clicking seeks WaveSurfer playhead
+    // Clicking seeks WaveSurfer playhead AND scrolls the editor card into view
     block.addEventListener('click', (e) => {
       e.stopPropagation();
       if (wavesurfer) {
         wavesurfer.setTime(cap.start);
+      }
+      // Also scroll the corresponding editor card into view
+      const card = document.getElementById(`edit-card-${index}`);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('active-playing');
+        // Remove highlight from other cards
+        document.querySelectorAll('.word-edit-card').forEach(c => {
+          if (c !== card) c.classList.remove('active-playing');
+        });
       }
     });
     
