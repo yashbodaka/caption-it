@@ -9,9 +9,12 @@ const state = {
   isPlaying: false,
   currentTime: 0,
   
-  // Caption list: [{ id, word, start, end }]
+  // Caption list: [{ id, word, start, end, sourceStart, sourceEnd }]
   captions: [],
   activeCaptionIndex: -1,
+  
+  // Timeline clips: [{ id, sourceStart, sourceEnd, timelineStart, timelineEnd, type }]
+  clips: [],
   
   // Custom Background Media
   bgType: 'grid', // 'grid', 'green', 'black', 'custom'
@@ -165,7 +168,7 @@ const el = {
   btnClearAllWords: document.getElementById('btnClearAllWords'),
 
   // Video Exporter
-  exportFormat: document.getElementById('exportFormat') || { value: 'webm-transparent' },
+  exportFormat: document.getElementById('exportFormat') || { value: 'composite' },
   exportAudio: document.getElementById('exportAudio') || { value: 'include' },
   btnExportVideo: document.getElementById('btnExportVideo'),
   btnExportSRT: document.getElementById('btnExportSRT'),
@@ -199,6 +202,9 @@ const el = {
   timelineScrollContainer: document.getElementById('timelineScrollContainer'),
   timelineSubtitleTrack: document.getElementById('timelineSubtitleTrack'),
   timelineTracksWidthWrapper: document.getElementById('timelineTracksWidthWrapper'),
+  timelineVideoTrack: document.getElementById('timelineVideoTrack'),
+  btnSplitClip: document.getElementById('btnSplitClip'),
+  btnDeleteClip: document.getElementById('btnDeleteClip'),
 
   // TTS (Kokoro) Controls
   ttsVoice: document.getElementById('ttsVoice'),
@@ -358,6 +364,7 @@ function init() {
 }
 
 // --- Responsive Layout Handler (Moves DOM cards between Desktop 3-columns and Mobile InShot Tab panels) ---
+// --- Responsive Layout Handler (Moves DOM cards between Desktop 3-columns and Mobile InShot Tab panels) ---
 function initResponsiveLayout() {
   const handleLayoutSwitch = () => {
     const isDesktop = window.innerWidth >= 992;
@@ -366,9 +373,17 @@ function initResponsiveLayout() {
     
     if (!desktopLayout || !mobileLayout) return;
     
+    const desktopWaveformParent = document.getElementById('desktopWaveformContainerParent');
+    const mobileTimelineSection = document.getElementById('mobileTimelineSection');
+    
     if (isDesktop) {
       desktopLayout.classList.remove('hidden');
       mobileLayout.classList.add('hidden');
+      
+      // Hide the redundant static waveform card on desktop resolutions
+      if (desktopWaveformParent) {
+        desktopWaveformParent.classList.add('hidden');
+      }
       
       // Move style cards to desktop left panel content
       const leftContent = document.getElementById('desktopLeftContent');
@@ -379,12 +394,17 @@ function initResponsiveLayout() {
         leftContent.appendChild(document.getElementById('styleLayoutCard'));
       }
       
-      // Move preview stage elements to desktop center content
+      // Move preview stage elements and timeline container to desktop center content
       const centerContent = document.getElementById('desktopCenterContent');
       if (centerContent) {
         centerContent.appendChild(document.getElementById('canvasViewport'));
         centerContent.appendChild(document.getElementById('playerToolbarContainer'));
-        centerContent.appendChild(document.getElementById('desktopWaveformContainerParent'));
+        if (mobileTimelineSection) {
+          centerContent.appendChild(mobileTimelineSection);
+        }
+        if (desktopWaveformParent) {
+          centerContent.appendChild(desktopWaveformParent); // Keep hidden in DOM here
+        }
         centerContent.appendChild(document.getElementById('exportSectionDesktop'));
       }
       
@@ -399,20 +419,24 @@ function initResponsiveLayout() {
         rightContent.appendChild(document.getElementById('transcriptEditorCard'));
       }
       
-      // Ensure WaveSurfer container is desktop
-      const desktopWaveform = document.getElementById('desktopWaveformContainer');
+      // Ensure the shared audio waveform remains inside mobileWaveformTrackBody on all viewports
+      const mobileWaveformTrack = document.getElementById('mobileWaveformTrackBody');
       const audioWaveform = document.getElementById('audioWaveform');
-      if (desktopWaveform && audioWaveform) {
-        desktopWaveform.appendChild(audioWaveform);
+      if (mobileWaveformTrack && audioWaveform && audioWaveform.parentElement !== mobileWaveformTrack) {
+        mobileWaveformTrack.appendChild(audioWaveform);
       }
       
       if (wavesurfer && typeof wavesurfer.zoom === 'function') {
-        // Flat waveform view on desktop (no horizontal scroll zoom)
-        wavesurfer.zoom(0);
+        // Zoom WaveSurfer track on desktop timeline
+        wavesurfer.zoom(PIXELS_PER_SECOND);
       }
     } else {
       desktopLayout.classList.add('hidden');
       mobileLayout.classList.remove('hidden');
+      
+      if (desktopWaveformParent) {
+        desktopWaveformParent.classList.remove('hidden');
+      }
       
       // Move cards to mobile tab panels
       const panelMedia = document.getElementById('panel-media');
@@ -449,10 +473,16 @@ function initResponsiveLayout() {
         mobilePreview.appendChild(document.getElementById('playerToolbarContainer'));
       }
       
-      // Move waveform container to mobile timeline track body
+      // Move the timeline container back to the mobile layout stage
+      const mobileMainStage = document.querySelector('#mobileLayout .main-stage');
+      if (mobileMainStage && mobileTimelineSection) {
+        mobileMainStage.appendChild(mobileTimelineSection);
+      }
+      
+      // Ensure the shared audio waveform remains inside mobileWaveformTrackBody on all viewports
       const mobileWaveformTrack = document.getElementById('mobileWaveformTrackBody');
       const audioWaveform = document.getElementById('audioWaveform');
-      if (mobileWaveformTrack && audioWaveform) {
+      if (mobileWaveformTrack && audioWaveform && audioWaveform.parentElement !== mobileWaveformTrack) {
         mobileWaveformTrack.appendChild(audioWaveform);
       }
       
@@ -460,6 +490,13 @@ function initResponsiveLayout() {
         // Zoom WaveSurfer track on mobile timeline
         wavesurfer.zoom(PIXELS_PER_SECOND);
       }
+    }
+    
+    // Force timeline re-render and synchronization on layout switch
+    if (state.audioDuration && state.audioDuration > 0) {
+      renderTimelineRuler();
+      renderTimelineWords();
+      renderTimelineVideoTrack();
     }
   };
   
@@ -612,7 +649,7 @@ function setupEventListeners() {
     if (!el.canvasLoadingPrompt.classList.contains('hidden')) return;
 
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('audio/')) {
+    if (file && (file.type.startsWith('audio/') || file.type.startsWith('video/'))) {
       handleAudioFile(file);
     }
   });
@@ -795,13 +832,13 @@ function setupEventListeners() {
     });
   }
 
-  // Click timeline track width wrapper to seek WaveSurfer
+  // Click timeline track width wrapper to seek Playback time
   if (el.timelineTracksWidthWrapper) {
     el.timelineTracksWidthWrapper.addEventListener('click', (e) => {
       if (!wavesurfer || state.audioDuration === 0) return;
       
-      // Ignore if clicked on a subtitle word block (it has its own click handler)
-      if (e.target.closest('.timeline-word-block')) {
+      // Ignore if clicked on a subtitle word block or a clip block (they have their own click handlers)
+      if (e.target.closest('.timeline-word-block') || e.target.closest('.timeline-clip')) {
         return;
       }
       
@@ -811,11 +848,179 @@ function setupEventListeners() {
       const clickX = e.clientX - rect.left - paddingLeft;
       const clickTime = clickX / PIXELS_PER_SECOND;
       
-      if (clickTime >= 0 && clickTime <= state.audioDuration) {
-        wavesurfer.setTime(clickTime);
+      const totalDuration = state.clips && state.clips.length > 0
+        ? Math.max(...state.clips.map(c => c.timelineEnd))
+        : state.audioDuration;
+
+      if (clickTime >= 0 && clickTime <= totalDuration) {
+        state.currentTime = clickTime;
+        
+        // Map to media time and seek wavesurfer/video
+        const { time: sourceTime, clip } = getMediaTimeFromTimelineTime(clickTime);
+        if (clip) {
+          wavesurfer.setTime(sourceTime);
+          if (state.bgMediaElement) {
+            state.bgMediaElement.currentTime = sourceTime;
+          }
+        } else {
+          // In a gap, seek wavesurfer to nearby clip or let it be
+          wavesurfer.setTime(0);
+        }
+        
+        // Redraw/update UI
+        el.currentTimeDisplay.textContent = `${formatTime(state.currentTime)} / ${formatTime(totalDuration)}`;
+        if (el.currentTimeMobile) el.currentTimeMobile.textContent = formatTime(state.currentTime);
+        el.timelinePositionDisplay.textContent = `Time: ${state.currentTime.toFixed(2)}s | Frame: ${Math.floor(state.currentTime * 30)} | Word Count: ${state.captions.length}`;
+        highlightActiveSubtitleWord(state.currentTime);
+        drawCanvas(state.currentTime);
+        if (el.timelineScrollContainer) {
+          el.timelineScrollContainer.scrollLeft = state.currentTime * PIXELS_PER_SECOND;
+        }
       }
     });
   }
+
+  // Split and Delete clip buttons click events
+  el.btnSplitClip?.addEventListener('click', splitSelectedClip);
+  el.btnDeleteClip?.addEventListener('click', deleteSelectedClip);
+
+  // Preview Canvas Double Click to edit subtitle word on-screen
+  el.previewCanvas?.addEventListener('dblclick', (e) => {
+    if (state.captions.length === 0) return;
+
+    const rect = el.previewCanvas.getBoundingClientRect();
+    const clickX_client = e.clientX - rect.left;
+    const clickY_client = e.clientY - rect.top;
+    
+    // Scale to canvas internal dimensions
+    const clickX = clickX_client * (el.previewCanvas.width / rect.width);
+    const clickY = clickY_client * (el.previewCanvas.height / rect.height);
+
+    const w = el.previewCanvas.width;
+    const h = el.previewCanvas.height;
+    
+    const phrases = groupCaptionsIntoPhrases(state.captions, state.style.wordsPerLine);
+    const currentPhrase = phrases.find(p => state.currentTime >= p.start && state.currentTime <= p.end);
+    
+    if (!currentPhrase) return;
+
+    const ctx = el.previewCanvas.getContext('2d');
+    ctx.save();
+    
+    let fontString = '';
+    if (state.style.textItalic) fontString += 'italic ';
+    fontString += `${state.style.fontWeight} ${state.style.fontSize * (w / 1080)}px "${state.style.fontFamily}"`;
+    ctx.font = fontString;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const words = currentPhrase.words;
+    const fontSizeScaled = state.style.fontSize * (w / 1080);
+    const spacing = 32 * (w / 1080);
+    const maxTextWidth = w * 0.85;
+
+    // Wrap words into lines
+    const lines = [];
+    let currentLine = [];
+    let currentLineWidth = 0;
+
+    words.forEach((wd) => {
+      let text = wd.word;
+      if (state.style.textUppercase) text = text.toUpperCase();
+      const wordWidth = ctx.measureText(text).width;
+
+      if (currentLine.length > 0 && currentLineWidth + spacing + wordWidth > maxTextWidth) {
+        lines.push({ words: currentLine, width: currentLineWidth });
+        currentLine = [wd];
+        currentLineWidth = wordWidth;
+      } else {
+        if (currentLine.length === 0) {
+          currentLineWidth = wordWidth;
+        } else {
+          currentLineWidth += spacing + wordWidth;
+        }
+        currentLine.push(wd);
+      }
+    });
+
+    if (currentLine.length > 0) {
+      lines.push({ words: currentLine, width: currentLineWidth });
+    }
+
+    const anchorY = h * (state.style.captionPosition / 100);
+    const lineHeight = fontSizeScaled * 1.35;
+    const totalBlockHeight = (lines.length - 1) * lineHeight;
+    const startY = anchorY - (totalBlockHeight / 2);
+
+    let foundWord = null;
+    let foundIndex = -1;
+    let foundRect = null;
+
+    lines.forEach((line, lineIdx) => {
+      if (foundWord) return;
+
+      const lineY = startY + lineIdx * lineHeight;
+      let lineStartX = 0;
+      if (state.style.textAlignment === 'center') {
+        lineStartX = (w - line.width) / 2;
+      } else if (state.style.textAlignment === 'left') {
+        lineStartX = w * 0.1;
+      } else if (state.style.textAlignment === 'right') {
+        lineStartX = w * 0.9 - line.width;
+      }
+
+      let currentX = lineStartX;
+
+      line.words.forEach((wd) => {
+        if (foundWord) return;
+
+        let text = wd.word;
+        if (state.style.textUppercase) text = text.toUpperCase();
+
+        const wordWidth = ctx.measureText(text).width;
+        
+        const wordLeft = currentX;
+        const wordRight = currentX + wordWidth;
+        const wordTop = lineY - fontSizeScaled / 2;
+        const wordBottom = lineY + fontSizeScaled / 2;
+
+        const pad = 20;
+        if (clickX >= wordLeft - pad && clickX <= wordRight + pad &&
+            clickY >= wordTop - pad && clickY <= wordBottom + pad) {
+          foundWord = wd;
+          foundIndex = state.captions.indexOf(wd);
+          foundRect = {
+            left: wordLeft,
+            top: wordTop,
+            width: wordWidth,
+            height: fontSizeScaled
+          };
+        }
+
+        currentX += wordWidth + spacing;
+      });
+    });
+
+    ctx.restore();
+
+    if (foundWord && foundIndex !== -1 && foundRect) {
+      // Pause playback
+      if (state.isPlaying) {
+        togglePlayback();
+      }
+
+      // Map canvas coordinates to client coordinates relative to #canvasViewport
+      const viewportRect = el.canvasViewport.getBoundingClientRect();
+      
+      const clientLeft = (foundRect.left * rect.width / el.previewCanvas.width) + (rect.left - viewportRect.left);
+      const clientTop = (foundRect.top * rect.height / el.previewCanvas.height) + (rect.top - viewportRect.top);
+      const clientWidth = foundRect.width * rect.width / el.previewCanvas.width;
+      const clientHeight = foundRect.height * rect.height / el.previewCanvas.height;
+
+      // Spawn overlay text input box
+      spawnCanvasTextInput(foundWord, foundIndex, clientLeft, clientTop, clientWidth, clientHeight);
+    }
+  });
 }
 
 // --- Status Indicator & Config ---
@@ -927,30 +1132,32 @@ function setupWaveSurfer() {
 
     // Sync state and redraw canvas when timeline scrubs
     wavesurfer.on('timeupdate', (time) => {
-      state.currentTime = time;
-      el.currentTimeDisplay.textContent = `${formatTime(time)} / ${formatTime(state.audioDuration)}`;
+      if (state.isPlaying) return; // Managed by renderStep
+
+      // Manual seek or scrub on wavesurfer waveform
+      state.currentTime = getTimelineTimeFromMediaTime(time);
+      
+      const totalDuration = state.clips && state.clips.length > 0
+        ? Math.max(...state.clips.map(c => c.timelineEnd))
+        : state.audioDuration;
+        
+      el.currentTimeDisplay.textContent = `${formatTime(state.currentTime)} / ${formatTime(totalDuration)}`;
       if (el.currentTimeMobile) {
-        el.currentTimeMobile.textContent = formatTime(time);
+        el.currentTimeMobile.textContent = formatTime(state.currentTime);
       }
       if (el.durationTimeMobile) {
-        el.durationTimeMobile.textContent = formatTime(state.audioDuration);
+        el.durationTimeMobile.textContent = formatTime(totalDuration);
       }
-      el.timelinePositionDisplay.textContent = `Time: ${time.toFixed(2)}s | Frame: ${Math.floor(time * 30)} | Word Count: ${state.captions.length}`;
-      
-      // Highlight the active playing card
-      highlightActiveSubtitleWord(time);
-      
-      // Draw canvas
-      drawCanvas(time);
-      
-      // Auto-scroll timeline to keep playhead centered
+      el.timelinePositionDisplay.textContent = `Time: ${state.currentTime.toFixed(2)}s | Frame: ${Math.floor(state.currentTime * 30)} | Word Count: ${state.captions.length}`;
+      highlightActiveSubtitleWord(state.currentTime);
+      drawCanvas(state.currentTime);
       if (el.timelineScrollContainer) {
-        el.timelineScrollContainer.scrollLeft = time * PIXELS_PER_SECOND;
+        el.timelineScrollContainer.scrollLeft = state.currentTime * PIXELS_PER_SECOND;
       }
-      
-      // Update Tap-to-Sync bubble active states
-      if (state.tapSync.isActive && state.tapSync.isSyncing) {
-        updateTapBubbleActiveState(time);
+      if (state.bgMediaElement) {
+        if (Math.abs(state.bgMediaElement.currentTime - time) > 0.15) {
+          state.bgMediaElement.currentTime = time;
+        }
       }
     });
 
@@ -966,7 +1173,31 @@ function setupWaveSurfer() {
       if (el.durationTimeMobile) {
         el.durationTimeMobile.textContent = formatTime(state.audioDuration);
       }
+
+      // Initialize default single clip covering the entire media file
+      const isVideo = state.audioFile && state.audioFile.type.startsWith('video/');
+      state.clips = [
+        {
+          id: 'clip-1',
+          sourceStart: 0,
+          sourceEnd: state.audioDuration,
+          timelineStart: 0,
+          timelineEnd: state.audioDuration,
+          type: isVideo ? 'video' : 'audio'
+        }
+      ];
+      state.selectedClipId = 'clip-1';
+
+      if (isVideo) {
+        const objectUrl = URL.createObjectURL(state.audioFile);
+        generateClipThumbnails(state.clips[0], objectUrl).then(thumbs => {
+          state.clips[0].thumbnails = thumbs;
+          renderTimelineVideoTrack();
+        });
+      }
+
       renderTimelineWords();
+      renderTimelineVideoTrack();
       renderTimelineRuler();
     });
 
@@ -1363,6 +1594,29 @@ function handleAudioFile(file) {
   const objectUrl = URL.createObjectURL(file);
   wavesurfer.load(objectUrl);
 
+  // If a video file is uploaded, automatically load it as background media
+  const isVideo = file.type.startsWith('video/');
+  if (isVideo) {
+    if (state.bgMediaElement && typeof state.bgMediaElement.pause === 'function') {
+      state.bgMediaElement.pause();
+    }
+    if (el.bgMediaContainer) {
+      el.bgMediaContainer.innerHTML = '';
+      
+      const video = document.createElement('video');
+      video.src = objectUrl;
+      video.muted = true; // Muted since Wavesurfer will play the audio track
+      video.playsInline = true;
+      video.style.width = '100%';
+      video.style.height = '100%';
+      video.style.objectFit = 'cover';
+      
+      el.bgMediaContainer.appendChild(video);
+      state.bgType = 'custom';
+      state.bgMediaElement = video;
+    }
+  }
+
   // Decode audio data to extract Float32Array for local Whisper model
   const reader = new FileReader();
   reader.onload = async (e) => {
@@ -1374,11 +1628,34 @@ function handleAudioFile(file) {
       const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       state.audioBuffer = decodedBuffer;
       state.audioDuration = decodedBuffer.duration;
+
+      // Initialize default single clip covering the entire media file
+      const isVideo = state.audioFile && state.audioFile.type.startsWith('video/');
+      state.clips = [
+        {
+          id: 'clip-1',
+          sourceStart: 0,
+          sourceEnd: state.audioDuration,
+          timelineStart: 0,
+          timelineEnd: state.audioDuration,
+          type: isVideo ? 'video' : 'audio'
+        }
+      ];
+      state.selectedClipId = 'clip-1';
+
+      if (isVideo) {
+        generateClipThumbnails(state.clips[0], objectUrl).then(thumbs => {
+          state.clips[0].thumbnails = thumbs;
+          renderTimelineVideoTrack();
+        });
+      }
+
       const trackWidth = state.audioDuration * PIXELS_PER_SECOND;
       if (el.timelineTracksWidthWrapper) {
         el.timelineTracksWidthWrapper.style.width = `${trackWidth}px`;
       }
       renderTimelineWords();
+      renderTimelineVideoTrack();
       
       // Original buffer diagnostics
       const origChannelData = decodedBuffer.getChannelData(0);
@@ -1429,6 +1706,14 @@ function removeAudioFile() {
   state.audioBuffer = null;
   state.audioDuration = 0;
   
+  if (state.bgMediaElement) {
+    if (typeof state.bgMediaElement.pause === 'function') state.bgMediaElement.pause();
+    state.bgMediaElement = null;
+  }
+  if (el.bgMediaContainer) {
+    el.bgMediaContainer.innerHTML = '';
+  }
+  
   wavesurfer.destroy();
   setupWaveSurfer();
   
@@ -1445,6 +1730,8 @@ function removeAudioFile() {
   el.btnClearAllWords.setAttribute('disabled', 'true');
 
   state.captions = [];
+  state.clips = [];
+  state.selectedClipId = null;
   if (el.timelineTracksWidthWrapper) {
     el.timelineTracksWidthWrapper.style.width = '0px';
   }
@@ -1452,6 +1739,7 @@ function removeAudioFile() {
   if (el.durationTimeMobile) el.durationTimeMobile.textContent = '00:00.0';
   renderSubtitleEditor();
   renderTimelineWords();
+  renderTimelineVideoTrack();
   renderTimelineRuler();
   drawCanvas(0);
 }
@@ -2063,9 +2351,63 @@ function disableExporters() {
   }
 }
 
+function syncCaptionTimestampsWithClips() {
+  if (!state.clips || state.clips.length === 0) return;
+  
+  state.captions.forEach(c => {
+    // Ensure baseline source times are set
+    if (c.sourceStart === undefined) c.sourceStart = c.start;
+    if (c.sourceEnd === undefined) c.sourceEnd = c.end;
+
+    // Find which clip covers the original source time of this caption
+    const clip = state.clips.find(clip => c.sourceStart >= clip.sourceStart && c.sourceStart <= clip.sourceEnd);
+    if (clip) {
+      // Calculate relative position within the clip and set timeline start/end
+      c.start = parseFloat((clip.timelineStart + (c.sourceStart - clip.sourceStart)).toFixed(3));
+      c.end = parseFloat((clip.timelineStart + (c.sourceEnd - clip.sourceStart)).toFixed(3));
+
+      // Clamp to clip boundaries (e.g. if clip is trimmed)
+      if (c.start < clip.timelineStart) c.start = clip.timelineStart;
+      if (c.end > clip.timelineEnd) c.end = clip.timelineEnd;
+      if (c.start >= c.end) {
+        c.start = -1;
+        c.end = -1;
+      }
+    } else {
+      // Clip deleted, make word inactive
+      c.start = -1;
+      c.end = -1;
+    }
+  });
+}
+
 function onCaptionsUpdated() {
+  // Ensure baseline source times are populated first based on active clips
+  state.captions.forEach(c => {
+    if (c.sourceStart === undefined) {
+      const clip = state.clips && state.clips.find(clip => c.start >= clip.timelineStart && c.start <= clip.timelineEnd);
+      if (clip) {
+        c.sourceStart = parseFloat((clip.sourceStart + (c.start - clip.timelineStart)).toFixed(3));
+      } else {
+        c.sourceStart = c.start;
+      }
+    }
+    if (c.sourceEnd === undefined) {
+      const clip = state.clips && state.clips.find(clip => c.end >= clip.timelineStart && c.end <= clip.timelineEnd);
+      if (clip) {
+        c.sourceEnd = parseFloat((clip.sourceStart + (c.end - clip.timelineStart)).toFixed(3));
+      } else {
+        c.sourceEnd = c.end;
+      }
+    }
+  });
+
+  // Calculate matching timeline positions based on active clips
+  syncCaptionTimestampsWithClips();
+
   renderSubtitleEditor();
   renderTimelineWords();
+  renderTimelineVideoTrack();
   
   // Enable exporters
   if (state.captions.length > 0) {
@@ -2081,7 +2423,7 @@ function onCaptionsUpdated() {
   }
 
   // Redraw
-  drawCanvas(wavesurfer ? wavesurfer.getCurrentTime() : 0);
+  drawCanvas(state.currentTime);
 }
 
 // Render Subtitle grid editor in right panel
@@ -2133,8 +2475,17 @@ function renderSubtitleEditor() {
     startInput.min = '0';
     startInput.addEventListener('change', (e) => {
       const val = parseFloat(e.target.value);
-      state.captions[index].start = parseFloat(val.toFixed(3));
-      drawCanvas(wavesurfer.getCurrentTime());
+      const cap = state.captions[index];
+      cap.start = parseFloat(val.toFixed(3));
+      
+      const clip = state.clips && state.clips.find(clip => cap.start >= clip.timelineStart && cap.start <= clip.timelineEnd);
+      if (clip) {
+        cap.sourceStart = parseFloat((clip.sourceStart + (cap.start - clip.timelineStart)).toFixed(3));
+      } else {
+        cap.sourceStart = cap.start;
+      }
+      
+      onCaptionsUpdated();
     });
     startGroup.appendChild(startInput);
     card.appendChild(startGroup);
@@ -2150,8 +2501,17 @@ function renderSubtitleEditor() {
     endInput.min = '0';
     endInput.addEventListener('change', (e) => {
       const val = parseFloat(e.target.value);
-      state.captions[index].end = parseFloat(val.toFixed(3));
-      drawCanvas(wavesurfer.getCurrentTime());
+      const cap = state.captions[index];
+      cap.end = parseFloat(val.toFixed(3));
+      
+      const clip = state.clips && state.clips.find(clip => cap.end >= clip.timelineStart && cap.end <= clip.timelineEnd);
+      if (clip) {
+        cap.sourceEnd = parseFloat((clip.sourceStart + (cap.end - clip.timelineStart)).toFixed(3));
+      } else {
+        cap.sourceEnd = cap.end;
+      }
+      
+      onCaptionsUpdated();
     });
     endGroup.appendChild(endInput);
     card.appendChild(endGroup);
@@ -2485,8 +2845,45 @@ function drawCanvas(time) {
   const w = el.previewCanvas.width;
   const h = el.previewCanvas.height;
 
-  // Clear Canvas (Transparent or Styled backgrounds are drawn underneath the canvas in HTML, but let's clear here)
+  // Clear Canvas
   ctx.clearRect(0, 0, w, h);
+
+  // Background Compositing logic for Exporting or preview solid colors
+  const isExporting = state.isExporting;
+  const exportFormat = el.exportFormat ? el.exportFormat.value : '';
+
+  if (isExporting) {
+    if (exportFormat === 'webm-green' || exportFormat === 'mp4-green') {
+      ctx.fillStyle = '#00ff00';
+      ctx.fillRect(0, 0, w, h);
+    } else if (exportFormat === 'webm-black') {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+    } else if (exportFormat === 'composite') {
+      if (state.bgType === 'custom' && state.bgMediaElement) {
+        try {
+          ctx.drawImage(state.bgMediaElement, 0, 0, w, h);
+        } catch (e) {
+          console.warn("Could not draw background media frame on export:", e);
+        }
+      } else if (state.bgType === 'green') {
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(0, 0, w, h);
+      } else if (state.bgType === 'black') {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
+  } else {
+    // During preview, render solid color backgrounds on canvas if selected
+    if (state.bgType === 'green') {
+      ctx.fillStyle = '#00ff00';
+      ctx.fillRect(0, 0, w, h);
+    } else if (state.bgType === 'black') {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
 
   if (state.captions.length === 0) return;
 
@@ -2504,6 +2901,17 @@ function drawCanvas(time) {
   let fontString = '';
   if (state.style.textItalic) fontString += 'italic ';
   fontString += `${state.style.fontWeight} ${state.style.fontSize * (w / 1080)}px "${state.style.fontFamily}"`; // Scales font size to canvas width resolution
+
+  // Check if font is loaded (only in browser environment, during preview)
+  if (!state.isExporting && typeof document !== 'undefined' && document.fonts) {
+    const checkSpec = `${state.style.textItalic ? 'italic' : 'normal'} ${state.style.fontWeight} 16px "${state.style.fontFamily}"`;
+    if (!document.fonts.check(checkSpec)) {
+      document.fonts.load(checkSpec).then(() => {
+        drawCanvas(time);
+      }).catch(e => console.warn(e));
+    }
+  }
+
   ctx.font = fontString;
   ctx.textAlign = 'center'; // Center alignment draws relatively around anchor x
   ctx.textBaseline = 'middle';
@@ -2733,22 +3141,81 @@ function hexToRgba(hex, opacity) {
 }
 
 let animationFrameId = null;
+let lastPlayTimestamp = 0;
 
 function startRenderLoop() {
   if (animationFrameId) return; // already running
+  lastPlayTimestamp = performance.now();
   
   function renderStep() {
     if (state.isPlaying && wavesurfer) {
-      drawCanvas(wavesurfer.getCurrentTime());
-      
-      // Also update background video time if synchronized
-      if (state.bgType === 'custom' && state.bgMediaElement && state.bgMediaElement.tagName === 'VIDEO') {
-        const audioTime = wavesurfer.getCurrentTime();
-        if (Math.abs(state.bgMediaElement.currentTime - audioTime) > 0.3) {
-          state.bgMediaElement.currentTime = audioTime;
+      const now = performance.now();
+      const dt = (now - lastPlayTimestamp) / 1000;
+      lastPlayTimestamp = now;
+
+      // Update timeline current time
+      state.currentTime += dt;
+
+      const totalDuration = state.clips && state.clips.length > 0
+        ? Math.max(...state.clips.map(c => c.timelineEnd))
+        : state.audioDuration;
+
+      if (state.currentTime >= totalDuration) {
+        state.currentTime = totalDuration;
+        togglePlayback(); // Pause at the end
+        return;
+      }
+
+      // Map timeline playhead to clip media time
+      const { time: sourceTime, clip } = getMediaTimeFromTimelineTime(state.currentTime);
+
+      if (clip) {
+        // We are inside a clip: play audio/video
+        if (!wavesurfer.isPlaying()) {
+          wavesurfer.play();
+        }
+        
+        // Prevent audio drift
+        if (Math.abs(wavesurfer.getCurrentTime() - sourceTime) > 0.15) {
+          wavesurfer.setTime(sourceTime);
+        }
+
+        // Handle background video element
+        if (state.bgMediaElement) {
+          if (state.bgMediaElement.paused) {
+            state.bgMediaElement.play().catch(e => {});
+          }
+          if (Math.abs(state.bgMediaElement.currentTime - sourceTime) > 0.15) {
+            state.bgMediaElement.currentTime = sourceTime;
+          }
+        }
+      } else {
+        // We are in a gap: pause wavesurfer and video, play silence
+        if (wavesurfer.isPlaying()) {
+          wavesurfer.pause();
+        }
+        if (state.bgMediaElement && !state.bgMediaElement.paused) {
+          state.bgMediaElement.pause();
         }
       }
+
+      // Update UI displays
+      el.currentTimeDisplay.textContent = `${formatTime(state.currentTime)} / ${formatTime(totalDuration)}`;
+      if (el.currentTimeMobile) {
+        el.currentTimeMobile.textContent = formatTime(state.currentTime);
+      }
+      if (el.durationTimeMobile) {
+        el.durationTimeMobile.textContent = formatTime(totalDuration);
+      }
+      el.timelinePositionDisplay.textContent = `Time: ${state.currentTime.toFixed(2)}s | Frame: ${Math.floor(state.currentTime * 30)} | Word Count: ${state.captions.length}`;
       
+      highlightActiveSubtitleWord(state.currentTime);
+      drawCanvas(state.currentTime);
+      
+      if (el.timelineScrollContainer) {
+        el.timelineScrollContainer.scrollLeft = state.currentTime * PIXELS_PER_SECOND;
+      }
+
       animationFrameId = requestAnimationFrame(renderStep);
     } else {
       animationFrameId = null;
@@ -2770,25 +3237,64 @@ function togglePlayback() {
   if (!wavesurfer) return;
   
   if (state.isPlaying) {
+    state.isPlaying = false;
     wavesurfer.pause();
     if (state.bgMediaElement && typeof state.bgMediaElement.pause === 'function') {
       state.bgMediaElement.pause();
     }
+    el.btnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i>';
+    stopRenderLoop();
   } else {
-    wavesurfer.play();
-    if (state.bgMediaElement && typeof state.bgMediaElement.play === 'function') {
-      state.bgMediaElement.play();
+    state.isPlaying = true;
+    el.btnPlayPause.innerHTML = '<i class="fa-solid fa-pause"></i>';
+    
+    // Position wavesurfer/video correctly at start of play
+    const { time: sourceTime, clip } = getMediaTimeFromTimelineTime(state.currentTime);
+    if (clip) {
+      wavesurfer.setTime(sourceTime);
+      if (state.bgMediaElement) {
+        state.bgMediaElement.currentTime = sourceTime;
+      }
+      wavesurfer.play();
+      if (state.bgMediaElement && typeof state.bgMediaElement.play === 'function') {
+        state.bgMediaElement.play().catch(e => {});
+      }
+    } else {
+      wavesurfer.pause();
+      if (state.bgMediaElement && typeof state.bgMediaElement.pause === 'function') {
+        state.bgMediaElement.pause();
+      }
     }
+    startRenderLoop();
   }
 }
 
 function stopPlayback() {
   if (!wavesurfer) return;
+  state.isPlaying = false;
+  el.btnPlayPause.innerHTML = '<i class="fa-solid fa-play"></i>';
+  stopRenderLoop();
+  
   wavesurfer.stop();
   wavesurfer.setTime(0);
+  state.currentTime = 0;
+  
   if (state.bgMediaElement) {
     state.bgMediaElement.currentTime = 0;
     if (typeof state.bgMediaElement.pause === 'function') state.bgMediaElement.pause();
+  }
+
+  // Reset UI
+  const totalDuration = state.clips && state.clips.length > 0
+    ? Math.max(...state.clips.map(c => c.timelineEnd))
+    : state.audioDuration;
+
+  el.currentTimeDisplay.textContent = `00:00.0 / ${formatTime(totalDuration)}`;
+  if (el.currentTimeMobile) el.currentTimeMobile.textContent = '00:00.0';
+  highlightActiveSubtitleWord(0);
+  drawCanvas(0);
+  if (el.timelineScrollContainer) {
+    el.timelineScrollContainer.scrollLeft = 0;
   }
 }
 
@@ -2801,10 +3307,12 @@ async function startExportingSubtitlesVideo() {
   el.exportProgressContainer.classList.remove('hidden');
   
   wavesurfer.pause();
-  wavesurfer.setTime(0);
+  state.currentTime = 0;
   if (state.bgMediaElement) state.bgMediaElement.currentTime = 0;
   
-  const totalDuration = state.audioDuration;
+  const totalDuration = state.clips && state.clips.length > 0
+    ? Math.max(...state.clips.map(c => c.timelineEnd))
+    : state.audioDuration;
   const fps = 30;
   const totalFrames = Math.ceil(totalDuration * fps);
   
@@ -2821,10 +3329,45 @@ async function startExportingSubtitlesVideo() {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     mediaStreamDest = audioContext.createMediaStreamDestination();
     
+    // Construct composite audio buffer from clips
+    let compositeBuffer = state.audioBuffer;
+    if (state.clips && state.clips.length > 0 && state.audioBuffer) {
+      const sampleRate = state.audioBuffer.sampleRate;
+      const numChannels = state.audioBuffer.numberOfChannels;
+      const totalSamples = Math.ceil(totalDuration * sampleRate);
+      
+      try {
+        const compositeAudioBuffer = audioContext.createBuffer(numChannels, totalSamples, sampleRate);
+        for (let channel = 0; channel < numChannels; channel++) {
+          const origData = state.audioBuffer.getChannelData(channel);
+          const destData = compositeAudioBuffer.getChannelData(channel);
+          
+          state.clips.forEach(clip => {
+            const srcStartIdx = Math.round(clip.sourceStart * sampleRate);
+            const srcEndIdx = Math.round(clip.sourceEnd * sampleRate);
+            const destStartIdx = Math.round(clip.timelineStart * sampleRate);
+            
+            const clipLength = srcEndIdx - srcStartIdx;
+            for (let i = 0; i < clipLength; i++) {
+              const srcIdx = srcStartIdx + i;
+              const destIdx = destStartIdx + i;
+              if (srcIdx < origData.length && destIdx < totalSamples) {
+                destData[destIdx] = origData[srcIdx];
+              }
+            }
+          });
+        }
+        compositeBuffer = compositeAudioBuffer;
+      } catch (err) {
+        console.warn("Failed to create composite audio buffer for export:", err);
+      }
+    }
+
     // Load audio buffer into offline source
     audioSource = audioContext.createBufferSource();
-    audioSource.buffer = state.audioBuffer;
+    audioSource.buffer = compositeBuffer;
     audioSource.connect(mediaStreamDest);
+    audioSource.connect(audioContext.destination); // Play so user hears the composite audio in sync
     
     // Add audio track to recorded stream
     const audioTrack = mediaStreamDest.stream.getAudioTracks()[0];
@@ -2842,19 +3385,25 @@ async function startExportingSubtitlesVideo() {
   let extension = 'webm';
 
   if (format === 'mp4-green') {
-    // Standard MP4 is typically not natively supported by browser encoding.
-    // Standard browsers natively only record 'video/webm'. We record WebM but styled with green screen, which video editors can read directly.
-    // We notify user or fallback. WebM is extremely widely supported now, and renaming WebM to MP4 doesn't work, but modern video editors accept WebM!
     mimeType = 'video/webm';
     extension = 'webm';
     alert("Notice: Browsers natively export high-quality WebM. For 'MP4 Green Screen', we are rendering a Green Screen WebM file which you can import directly into Premiere/CapCut. You will have full chroma key support!");
   } else if (format === 'webm-green') {
     mimeType = 'video/webm';
     extension = 'webm';
+  } else if (format === 'webm-black') {
+    mimeType = 'video/webm';
+    extension = 'webm';
   }
 
+  const origVol = wavesurfer.getVolume();
+  wavesurfer.setVolume(0); // Mute wavesurfer so it doesn't double-play with our audioSource
+
   const recordedChunks = [];
-  const recorder = new MediaRecorder(combinedStream, { mimeType: mimeType });
+  const recorder = new MediaRecorder(combinedStream, { 
+    mimeType: mimeType,
+    videoBitsPerSecond: 10000000
+  });
 
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) {
@@ -2877,6 +3426,9 @@ async function startExportingSubtitlesVideo() {
     URL.revokeObjectURL(url);
     
     if (audioContext) audioContext.close();
+    
+    // Restore wavesurfer volume
+    wavesurfer.setVolume(origVol);
 
     // Reset UI
     state.isExporting = false;
@@ -2890,23 +3442,23 @@ async function startExportingSubtitlesVideo() {
   recorder.start();
   if (audioSource) audioSource.start(0);
 
-  // Play audio in Wavesurfer to animate canvas in sync
-  wavesurfer.play();
-  if (state.bgMediaElement && typeof state.bgMediaElement.play === 'function') {
-    state.bgMediaElement.play();
-  }
+  // Play timeline
+  state.isPlaying = true;
+  lastPlayTimestamp = performance.now();
+  startRenderLoop();
 
   // Progress monitoring interval
   const checkProgressInterval = setInterval(() => {
-    const elapsed = wavesurfer.getCurrentTime();
+    const elapsed = state.currentTime;
     const percent = Math.min(100, Math.round((elapsed / totalDuration) * 100));
     
     el.exportProgressLabel.textContent = `Rendering Captions: ${elapsed.toFixed(1)}s / ${totalDuration.toFixed(1)}s`;
     el.exportProgressPercentage.textContent = `${percent}%`;
     el.exportProgressFill.style.width = `${percent}%`;
 
-    if (elapsed >= totalDuration || !wavesurfer.isPlaying()) {
+    if (elapsed >= totalDuration || !state.isPlaying) {
       clearInterval(checkProgressInterval);
+      state.isPlaying = false;
       wavesurfer.pause();
       if (state.bgMediaElement && typeof state.bgMediaElement.pause === 'function') state.bgMediaElement.pause();
       
@@ -2959,6 +3511,523 @@ function formatSRTTime(seconds) {
   const ms = Math.floor((seconds % 1) * 1000);
   const timeString = date.toISOString().substr(11, 8);
   return `${timeString},${ms.toString().padStart(3, '0')}`;
+}
+
+// --- Multi-clip Timeline Helper Functions ---
+
+function getMediaTimeFromTimelineTime(t) {
+  if (!state.clips || state.clips.length === 0) return { time: t, clip: null };
+  const clip = state.clips.find(c => t >= c.timelineStart && t <= c.timelineEnd);
+  if (clip) {
+    const relativeTime = t - clip.timelineStart;
+    const sourceTime = clip.sourceStart + relativeTime;
+    return { time: sourceTime, clip: clip };
+  }
+  return { time: -1, clip: null };
+}
+
+function getTimelineTimeFromMediaTime(sourceTime) {
+  if (!state.clips || state.clips.length === 0) return sourceTime;
+  const clip = state.clips.find(c => sourceTime >= c.sourceStart && sourceTime <= c.sourceEnd);
+  if (clip) {
+    const relativeTime = sourceTime - clip.sourceStart;
+    return clip.timelineStart + relativeTime;
+  }
+  return sourceTime;
+}
+
+async function generateClipThumbnails(clip, videoSrc) {
+  return new Promise((resolve) => {
+    const tempVideo = document.createElement('video');
+    tempVideo.src = videoSrc;
+    tempVideo.muted = true;
+    tempVideo.playsInline = true;
+    
+    tempVideo.style.position = 'absolute';
+    tempVideo.style.left = '-9999px';
+    tempVideo.style.width = '80px';
+    tempVideo.style.height = '45px';
+    document.body.appendChild(tempVideo);
+    
+    tempVideo.addEventListener('loadeddata', async () => {
+      const thumbnails = [];
+      const canvas = document.createElement('canvas');
+      canvas.width = 80;
+      canvas.height = 45;
+      const ctx = canvas.getContext('2d');
+      
+      const duration = clip.sourceEnd - clip.sourceStart;
+      const times = [
+        clip.sourceStart + duration * 0.1,
+        clip.sourceStart + duration * 0.5,
+        clip.sourceStart + duration * 0.9
+      ];
+      
+      for (let t of times) {
+        tempVideo.currentTime = t;
+        await new Promise(r => {
+          const onSeeked = () => {
+            tempVideo.removeEventListener('seeked', onSeeked);
+            r();
+          };
+          tempVideo.addEventListener('seeked', onSeeked);
+        });
+        
+        ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+        thumbnails.push(canvas.toDataURL('image/jpeg', 0.6));
+      }
+      
+      document.body.removeChild(tempVideo);
+      resolve(thumbnails);
+    });
+    
+    tempVideo.addEventListener('error', () => {
+      if (document.body.contains(tempVideo)) {
+        document.body.removeChild(tempVideo);
+      }
+      resolve([]);
+    });
+  });
+}
+
+function renderTimelineVideoTrack() {
+  const track = el.timelineVideoTrack;
+  if (!track) return;
+
+  track.innerHTML = '';
+
+  if (!state.clips || state.clips.length === 0) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'timeline-no-data-msg';
+    placeholder.textContent = 'Upload video/audio file to view clips';
+    track.appendChild(placeholder);
+    
+    if (el.btnSplitClip) el.btnSplitClip.disabled = true;
+    if (el.btnDeleteClip) el.btnDeleteClip.disabled = true;
+    return;
+  }
+
+  if (el.btnSplitClip) el.btnSplitClip.disabled = false;
+  if (el.btnDeleteClip) el.btnDeleteClip.disabled = !state.selectedClipId;
+
+  state.clips.forEach(clip => {
+    const block = document.createElement('div');
+    block.className = 'timeline-clip';
+    if (clip.id === state.selectedClipId) {
+      block.classList.add('selected');
+    }
+    block.dataset.id = clip.id;
+
+    // Position absolutely
+    const left = clip.timelineStart * PIXELS_PER_SECOND;
+    const duration = clip.timelineEnd - clip.timelineStart;
+    const width = Math.max(20, (duration * PIXELS_PER_SECOND) - 2);
+
+    block.style.left = `${left}px`;
+    block.style.width = `${width}px`;
+
+    // Render filmstrip / thumbnails
+    const filmstrip = document.createElement('div');
+    filmstrip.className = 'clip-filmstrip';
+    if (clip.thumbnails && clip.thumbnails.length > 0) {
+      clip.thumbnails.forEach(tUrl => {
+        const img = document.createElement('img');
+        img.src = tUrl;
+        filmstrip.appendChild(img);
+      });
+    }
+    block.appendChild(filmstrip);
+
+    // Label
+    const label = document.createElement('div');
+    label.className = 'clip-label';
+    label.textContent = `${clip.type.toUpperCase()} (${duration.toFixed(1)}s)`;
+    block.appendChild(label);
+
+    // Trim Handles
+    const leftHandle = document.createElement('div');
+    leftHandle.className = 'clip-trim-handle clip-trim-left';
+    block.appendChild(leftHandle);
+
+    const rightHandle = document.createElement('div');
+    rightHandle.className = 'clip-trim-handle clip-trim-right';
+    block.appendChild(rightHandle);
+
+    // Click to select
+    block.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.selectedClipId = clip.id;
+      renderTimelineVideoTrack();
+    });
+
+    // Left Handle Drag (Trim Start)
+    let isTrimmingLeft = false;
+    let trimLeftStartX = 0;
+    let trimLeftInitialSourceStart = 0;
+    let trimLeftInitialTimelineStart = 0;
+    let trimLeftInitialTimelineEnd = 0;
+
+    leftHandle.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      leftHandle.setPointerCapture(e.pointerId);
+      isTrimmingLeft = true;
+      trimLeftStartX = e.clientX;
+      trimLeftInitialSourceStart = clip.sourceStart;
+      trimLeftInitialTimelineStart = clip.timelineStart;
+      trimLeftInitialTimelineEnd = clip.timelineEnd;
+      state.selectedClipId = clip.id;
+      block.classList.add('trimming-left');
+      renderTimelineVideoTrack();
+    });
+
+    leftHandle.addEventListener('pointermove', (e) => {
+      if (!isTrimmingLeft) return;
+      e.stopPropagation();
+
+      const deltaX = e.clientX - trimLeftStartX;
+      const deltaSeconds = deltaX / PIXELS_PER_SECOND;
+
+      const precedingClip = state.clips
+        .filter(c => c.timelineEnd <= trimLeftInitialTimelineStart && c.id !== clip.id)
+        .sort((a, b) => b.timelineEnd - a.timelineEnd)[0];
+
+      // Limit expansion left by preceding clip timelineEnd or original source start = 0
+      const minTimelineStart = Math.max(
+        precedingClip ? precedingClip.timelineEnd : 0,
+        trimLeftInitialTimelineStart - trimLeftInitialSourceStart
+      );
+
+      // Limit trimming right: minimum duration 0.5s
+      const maxTimelineStart = trimLeftInitialTimelineEnd - 0.5;
+
+      let newTimelineStart = trimLeftInitialTimelineStart + deltaSeconds;
+      newTimelineStart = Math.max(minTimelineStart, Math.min(newTimelineStart, maxTimelineStart));
+
+      const actualDelta = newTimelineStart - trimLeftInitialTimelineStart;
+
+      clip.timelineStart = parseFloat(newTimelineStart.toFixed(3));
+      clip.sourceStart = parseFloat((trimLeftInitialSourceStart + actualDelta).toFixed(3));
+      
+      const newWidth = trimLeftInitialTimelineEnd - clip.timelineStart;
+      block.style.left = `${clip.timelineStart * PIXELS_PER_SECOND}px`;
+      block.style.width = `${newWidth * PIXELS_PER_SECOND}px`;
+    });
+
+    leftHandle.addEventListener('pointerup', (e) => {
+      if (!isTrimmingLeft) return;
+      isTrimmingLeft = false;
+      leftHandle.releasePointerCapture(e.pointerId);
+      block.classList.remove('trimming-left');
+
+      state.clips.sort((a, b) => a.timelineStart - b.timelineStart);
+      onCaptionsUpdated();
+      renderTimelineVideoTrack();
+    });
+
+    // Right Handle Drag (Trim End)
+    let isTrimmingRight = false;
+    let trimRightStartX = 0;
+    let trimRightInitialSourceEnd = 0;
+    let trimRightInitialTimelineStart = 0;
+    let trimRightInitialTimelineEnd = 0;
+
+    rightHandle.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      rightHandle.setPointerCapture(e.pointerId);
+      isTrimmingRight = true;
+      trimRightStartX = e.clientX;
+      trimRightInitialSourceEnd = clip.sourceEnd;
+      trimRightInitialTimelineStart = clip.timelineStart;
+      trimRightInitialTimelineEnd = clip.timelineEnd;
+      state.selectedClipId = clip.id;
+      block.classList.add('trimming-right');
+      renderTimelineVideoTrack();
+    });
+
+    rightHandle.addEventListener('pointermove', (e) => {
+      if (!isTrimmingRight) return;
+      e.stopPropagation();
+
+      const deltaX = e.clientX - trimRightStartX;
+      const deltaSeconds = deltaX / PIXELS_PER_SECOND;
+
+      const succeedingClip = state.clips
+        .filter(c => c.timelineStart >= trimRightInitialTimelineEnd && c.id !== clip.id)
+        .sort((a, b) => a.timelineStart - b.timelineStart)[0];
+
+      // Limit expansion right by succeeding clip timelineStart or original source duration end
+      const maxTimelineEnd = Math.min(
+        succeedingClip ? succeedingClip.timelineStart : Infinity,
+        trimRightInitialTimelineEnd + (state.audioDuration - trimRightInitialSourceEnd)
+      );
+
+      // Limit trimming left: minimum duration 0.5s
+      const minTimelineEnd = trimRightInitialTimelineStart + 0.5;
+
+      let newTimelineEnd = trimRightInitialTimelineEnd + deltaSeconds;
+      newTimelineEnd = Math.max(minTimelineEnd, Math.min(newTimelineEnd, maxTimelineEnd));
+
+      const actualDelta = newTimelineEnd - trimRightInitialTimelineEnd;
+
+      clip.timelineEnd = parseFloat(newTimelineEnd.toFixed(3));
+      clip.sourceEnd = parseFloat((trimRightInitialSourceEnd + actualDelta).toFixed(3));
+
+      const newWidth = clip.timelineEnd - trimRightInitialTimelineStart;
+      block.style.width = `${newWidth * PIXELS_PER_SECOND}px`;
+    });
+
+    rightHandle.addEventListener('pointerup', (e) => {
+      if (!isTrimmingRight) return;
+      isTrimmingRight = false;
+      rightHandle.releasePointerCapture(e.pointerId);
+      block.classList.remove('trimming-right');
+
+      state.clips.sort((a, b) => a.timelineStart - b.timelineStart);
+      onCaptionsUpdated();
+      renderTimelineVideoTrack();
+    });
+
+    // Drag to shift
+    let isDragging = false;
+    let startX = 0;
+    let initialTimelineStart = 0;
+    let initialTimelineEnd = 0;
+
+    block.addEventListener('pointerdown', (e) => {
+      if (e.target.classList.contains('clip-trim-handle')) {
+        return; // Let the trim handles capture events
+      }
+      e.stopPropagation();
+      block.setPointerCapture(e.pointerId);
+      isDragging = true;
+      startX = e.clientX;
+      initialTimelineStart = clip.timelineStart;
+      initialTimelineEnd = clip.timelineEnd;
+      state.selectedClipId = clip.id;
+      block.classList.add('dragging');
+      renderTimelineVideoTrack();
+    });
+
+    block.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      e.stopPropagation();
+
+      const deltaX = e.clientX - startX;
+      const deltaSeconds = deltaX / PIXELS_PER_SECOND;
+
+      const precedingClip = state.clips
+        .filter(c => c.timelineEnd <= initialTimelineStart && c.id !== clip.id)
+        .sort((a, b) => b.timelineEnd - a.timelineEnd)[0];
+      const succeedingClip = state.clips
+        .filter(c => c.timelineStart >= initialTimelineEnd && c.id !== clip.id)
+        .sort((a, b) => a.timelineStart - b.timelineStart)[0];
+
+      const minStart = precedingClip ? precedingClip.timelineEnd : 0;
+      const maxEnd = succeedingClip ? succeedingClip.timelineStart : Infinity;
+      const clipDuration = initialTimelineEnd - initialTimelineStart;
+
+      let newStart = initialTimelineStart + deltaSeconds;
+      let newEnd = newStart + clipDuration;
+
+      if (newStart < minStart) {
+        newStart = minStart;
+        newEnd = newStart + clipDuration;
+      }
+      if (newEnd > maxEnd) {
+        newEnd = maxEnd;
+        newStart = newEnd - clipDuration;
+      }
+
+      block.style.left = `${newStart * PIXELS_PER_SECOND}px`;
+      
+      clip.timelineStart = parseFloat(newStart.toFixed(3));
+      clip.timelineEnd = parseFloat(newEnd.toFixed(3));
+    });
+
+    block.addEventListener('pointerup', (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      block.releasePointerCapture(e.pointerId);
+      block.classList.remove('dragging');
+
+      // Check for slot swap / re-ordering
+      const dragCenter = (clip.timelineStart + clip.timelineEnd) / 2;
+      const overlapClip = state.clips.find(c => c.id !== clip.id && dragCenter >= c.timelineStart && dragCenter <= c.timelineEnd);
+
+      if (overlapClip) {
+        // Swap their slots in Canva magnetic style
+        const aStart = overlapClip.timelineStart;
+        const bStart = initialTimelineStart;
+        
+        const durationA = overlapClip.timelineEnd - overlapClip.timelineStart;
+        const durationB = initialTimelineEnd - initialTimelineStart;
+
+        if (initialTimelineStart > overlapClip.timelineStart) {
+          // clip was after overlapClip, now moved before overlapClip
+          clip.timelineStart = aStart;
+          clip.timelineEnd = aStart + durationB;
+          
+          overlapClip.timelineStart = clip.timelineEnd;
+          overlapClip.timelineEnd = overlapClip.timelineStart + durationA;
+        } else {
+          // clip was before overlapClip, now moved after overlapClip
+          overlapClip.timelineStart = bStart;
+          overlapClip.timelineEnd = bStart + durationA;
+          
+          clip.timelineStart = overlapClip.timelineEnd;
+          clip.timelineEnd = clip.timelineStart + durationB;
+        }
+      }
+
+      state.clips.sort((a, b) => a.timelineStart - b.timelineStart);
+      
+      onCaptionsUpdated();
+      renderTimelineVideoTrack();
+    });
+
+    track.appendChild(block);
+  });
+}
+
+function splitSelectedClip() {
+  if (!state.clips || state.clips.length === 0) return;
+  
+  const currentTime = state.currentTime;
+  const activeClipIndex = state.clips.findIndex(c => currentTime > c.timelineStart && currentTime < c.timelineEnd);
+  
+  if (activeClipIndex === -1) {
+    alert("Seek playhead to a valid position within a clip to split.");
+    return;
+  }
+  
+  const activeClip = state.clips[activeClipIndex];
+  const relativeSplitTime = currentTime - activeClip.timelineStart;
+  const sourceSplitTime = activeClip.sourceStart + relativeSplitTime;
+  
+  if (relativeSplitTime < 0.2 || (activeClip.timelineEnd - currentTime) < 0.2) {
+    alert("Cannot split too close to clip boundaries.");
+    return;
+  }
+
+  const clipA = {
+    id: `clip-${Date.now()}-a`,
+    sourceStart: activeClip.sourceStart,
+    sourceEnd: sourceSplitTime,
+    timelineStart: activeClip.timelineStart,
+    timelineEnd: currentTime,
+    type: activeClip.type,
+    thumbnails: activeClip.thumbnails ? activeClip.thumbnails.slice(0, 2) : []
+  };
+  
+  const clipB = {
+    id: `clip-${Date.now()}-b`,
+    sourceStart: sourceSplitTime,
+    sourceEnd: activeClip.sourceEnd,
+    timelineStart: currentTime,
+    timelineEnd: activeClip.timelineEnd,
+    type: activeClip.type,
+    thumbnails: activeClip.thumbnails ? activeClip.thumbnails.slice(1) : []
+  };
+  
+  state.clips.splice(activeClipIndex, 1, clipA, clipB);
+  state.selectedClipId = clipB.id;
+  
+  if (activeClip.type === 'video' && state.audioFile) {
+    const objectUrl = URL.createObjectURL(state.audioFile);
+    generateClipThumbnails(clipA, objectUrl).then(thumbs => {
+      clipA.thumbnails = thumbs;
+      renderTimelineVideoTrack();
+    });
+    generateClipThumbnails(clipB, objectUrl).then(thumbs => {
+      clipB.thumbnails = thumbs;
+      renderTimelineVideoTrack();
+    });
+  }
+  
+  onCaptionsUpdated();
+  renderTimelineVideoTrack();
+}
+
+function deleteSelectedClip() {
+  if (!state.selectedClipId) return;
+  
+  const clipIndex = state.clips.findIndex(c => c.id === state.selectedClipId);
+  if (clipIndex === -1) return;
+  
+  const deletedClip = state.clips[clipIndex];
+  const gapDuration = deletedClip.timelineEnd - deletedClip.timelineStart;
+  
+  state.clips.splice(clipIndex, 1);
+  
+  state.clips.forEach(c => {
+    if (c.timelineStart > deletedClip.timelineStart) {
+      c.timelineStart = parseFloat((c.timelineStart - gapDuration).toFixed(3));
+      c.timelineEnd = parseFloat((c.timelineEnd - gapDuration).toFixed(3));
+    }
+  });
+  
+  state.selectedClipId = null;
+  onCaptionsUpdated();
+  renderTimelineVideoTrack();
+}
+
+function spawnCanvasTextInput(wordObj, wordIndex, left, top, width, height) {
+  document.querySelectorAll('.canvas-text-input').forEach(el => el.remove());
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'canvas-text-input';
+  input.value = wordObj.word;
+
+  const padWidth = Math.max(80, width + 30);
+  const padLeft = left - (padWidth - width) / 2;
+  
+  input.style.left = `${padLeft}px`;
+  input.style.top = `${top - 6}px`;
+  input.style.width = `${padWidth}px`;
+  input.style.height = `${height + 12}px`;
+  
+  input.style.fontFamily = `"${state.style.fontFamily}", sans-serif`;
+  input.style.fontWeight = state.style.fontWeight;
+  if (state.style.textUppercase) input.style.textTransform = 'uppercase';
+
+  el.canvasViewport.appendChild(input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+
+  const commit = () => {
+    if (committed) return;
+    committed = true;
+    
+    const newVal = input.value.trim();
+    if (newVal && newVal !== wordObj.word) {
+      wordObj.word = newVal;
+      onCaptionsUpdated();
+    }
+    input.remove();
+  };
+
+  const cancel = () => {
+    if (committed) return;
+    committed = true;
+    input.remove();
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    commit();
+  });
 }
 
 // Apply default styling preset initially

@@ -358,8 +358,8 @@
               <div class="canvas-overlay clickable" id="canvasOverlay">
                 <div class="overlay-prompt" id="canvasUploadPrompt">
                   <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
-                  <p class="main-prompt">Upload an Audio File to Start</p>
-                  <p class="sub-prompt">Drag & drop or click here to upload narration</p>
+                  <p class="main-prompt">Upload an Audio or Video File</p>
+                  <p class="sub-prompt">Drag & drop or click here to upload narration or video</p>
                 </div>
                 <div class="overlay-prompt hidden" id="canvasLoadingPrompt">
                   <div class="ai-loading-spinner" style="margin-bottom: 16px;"></div>
@@ -421,8 +421,7 @@
                 <span id="currentTimeDisplay">00:00.0 / 00:00.0</span>
               </div>
               <div id="desktopWaveformContainer">
-                <!-- Shared Audio Waveform Div (Placed here by default) -->
-                <div id="audioWaveform"></div>
+                <!-- Shared Audio Waveform Div (Moved to mobileWaveformTrackBody) -->
               </div>
             </div>
 
@@ -435,9 +434,11 @@
                 <div class="control-group">
                   <label for="exportFormat">Export Format</label>
                   <select id="exportFormat">
-                    <option value="webm-transparent" selected>WebM Video (Transparent Background - High Quality)</option>
-                    <option value="webm-green">WebM Video (Green Screen)</option>
-                    <option value="mp4-green">MP4 Video (Green Screen - Universal Compatibility)</option>
+                    <option value="composite" selected>Download Whole Video with Captions (compositing background video, audio, and captions at high quality)</option>
+                    <option value="webm-transparent">Download Caption Video Only (Transparent WebM)</option>
+                    <option value="webm-green">Download Caption Video Only (Chroma Green WebM)</option>
+                    <option value="mp4-green">Download Caption Video Only (Chroma Green MP4)</option>
+                    <option value="webm-black">Download Caption Video Only (Black Background WebM)</option>
                   </select>
                 </div>
                 <div class="control-group">
@@ -583,16 +584,16 @@
               </div>
             </div>
 
-            <!-- 4. Audio File Details -->
+            <!-- 4. Audio/Video File Details -->
             <div class="section-card" id="audioDetailsCard">
-              <h3><i class="fa-solid fa-file-audio"></i> Narration Audio File</h3>
-              <input type="file" id="audioFileInput" accept="audio/*" class="hidden">
+              <h3><i class="fa-solid fa-file-video"></i> Narration / Video File</h3>
+              <input type="file" id="audioFileInput" accept="audio/*,video/*" class="hidden">
               <div id="audioFileDetails" class="hidden file-details-box">
-                <span class="file-name" id="selectedFileName">audio.mp3</span>
+                <span class="file-name" id="selectedFileName">video.mp4</span>
                 <span class="file-size" id="selectedFileSize">0.0 MB</span>
                 <button id="btnRemoveAudio" class="remove-btn" title="Remove File"><i class="fa-solid fa-times"></i></button>
               </div>
-              <p id="audioFileHint" class="transcript-hint" style="margin: 0; text-align: center;">No audio file uploaded yet. Upload via the video preview container or drag & drop here.</p>
+              <p id="audioFileHint" class="transcript-hint" style="margin: 0; text-align: center;">No media file uploaded yet. Upload via the video preview container or drag & drop here.</p>
             </div>
 
             <!-- 5. Tap to Sync Overlay Panel -->
@@ -692,9 +693,13 @@
           <section class="timeline-section glass-panel" id="mobileTimelineSection">
             <div class="timeline-container">
               <div class="timeline-header-bar">
-                <div class="timeline-title-area">
-                  <i class="fa-solid fa-clock"></i>
-                  <span>Timeline Editor</span>
+                <div class="timeline-actions">
+                  <button id="btnSplitClip" class="timeline-action-btn" title="Split Clip" disabled>
+                    <i class="fa-solid fa-scissors"></i> <span>Split</span>
+                  </button>
+                  <button id="btnDeleteClip" class="timeline-action-btn" title="Delete Clip" disabled>
+                    <i class="fa-solid fa-trash-can"></i> <span>Delete</span>
+                  </button>
                 </div>
                 <div class="timeline-time-display" id="currentTimeDisplayMobile">
                   00:00.0 / 00:00.0
@@ -714,17 +719,28 @@
                       </div>
                     </div>
 
-                    <!-- Track 1: Audio Waveform -->
+                    <!-- Track 1: Video/Audio Clips Track -->
+                    <div class="timeline-track-row video-track">
+                      <div class="track-info">
+                        <i class="fa-solid fa-video"></i>
+                        <span>Clips</span>
+                      </div>
+                      <div class="track-body" id="timelineVideoTrack">
+                        <div class="timeline-no-data-msg">Upload video/audio file to view clips</div>
+                      </div>
+                    </div>
+
+                    <!-- Track 2: Audio Waveform -->
                     <div class="timeline-track-row audio-track">
                       <div class="track-info">
                         <i class="fa-solid fa-waveform"></i>
                         <span>Wave</span>
                       </div>
                       <div class="track-body" id="mobileWaveformTrackBody">
-                        <!-- #audioWaveform will be moved here dynamically on mobile -->
+                        <div id="audioWaveform"></div>
                       </div>
                     </div>
-                    <!-- Track 2: Subtitle Word timings -->
+                    <!-- Track 3: Subtitle Word timings -->
                     <div class="timeline-track-row subtitles-track">
                       <div class="track-info">
                         <i class="fa-solid fa-closed-captioning"></i>
