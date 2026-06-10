@@ -938,7 +938,8 @@ function setupEventListeners() {
   // Click timeline track width wrapper to seek Playback time
   if (el.timelineTracksWidthWrapper) {
     el.timelineTracksWidthWrapper.addEventListener('click', (e) => {
-      if (!wavesurfer || state.audioDuration === 0) return;
+      const data = getActiveTimelineData();
+      if (!data.wavesurfer || data.duration === 0) return;
       
       // Ignore if clicked on a subtitle word block or a clip block (they have their own click handlers)
       if (e.target.closest('.timeline-word-block') || e.target.closest('.timeline-clip')) {
@@ -951,33 +952,54 @@ function setupEventListeners() {
       const clickX = e.clientX - rect.left - paddingLeft;
       const clickTime = clickX / PIXELS_PER_SECOND;
       
-      const totalDuration = state.clips && state.clips.length > 0
-        ? Math.max(...state.clips.map(c => c.timelineEnd))
-        : state.audioDuration;
+      const totalDuration = data.clips && data.clips.length > 0
+        ? Math.max(...data.clips.map(c => c.timelineEnd))
+        : data.duration;
 
       if (clickTime >= 0 && clickTime <= totalDuration) {
-        state.currentTime = clickTime;
+        if (state.appMode === 'caption') {
+          state.currentTime = clickTime;
+        } else {
+          state.videoMode.currentTime = clickTime;
+        }
         
         // Map to media time and seek wavesurfer/video
         const { time: sourceTime, clip } = getMediaTimeFromTimelineTime(clickTime);
         if (clip) {
-          wavesurfer.setTime(sourceTime);
-          if (state.bgMediaElement) {
-            state.bgMediaElement.currentTime = sourceTime;
+          data.wavesurfer.setTime(sourceTime);
+          if (state.appMode === 'caption') {
+            if (state.bgMediaElement) {
+              state.bgMediaElement.currentTime = sourceTime;
+            }
+          } else {
+            if (state.videoMode.videoBgElement) {
+              state.videoMode.videoBgElement.currentTime = sourceTime;
+            }
           }
         } else {
-          // In a gap, seek wavesurfer to nearby clip or let it be
-          wavesurfer.setTime(0);
+          data.wavesurfer.setTime(0);
         }
         
         // Redraw/update UI
-        el.currentTimeDisplay.textContent = `${formatTime(state.currentTime)} / ${formatTime(totalDuration)}`;
-        if (el.currentTimeMobile) el.currentTimeMobile.textContent = formatTime(state.currentTime);
-        el.timelinePositionDisplay.textContent = `Time: ${state.currentTime.toFixed(2)}s | Frame: ${Math.floor(state.currentTime * 30)} | Word Count: ${state.captions.length}`;
-        highlightActiveSubtitleWord(state.currentTime);
-        drawCanvas(state.currentTime);
-        if (el.timelineScrollContainer) {
-          el.timelineScrollContainer.scrollLeft = state.currentTime * PIXELS_PER_SECOND;
+        if (state.appMode === 'caption') {
+          el.currentTimeDisplay.textContent = `${formatTime(state.currentTime)} / ${formatTime(totalDuration)}`;
+          if (el.currentTimeMobile) el.currentTimeMobile.textContent = formatTime(state.currentTime);
+          el.timelinePositionDisplay.textContent = `Time: ${state.currentTime.toFixed(2)}s | Frame: ${Math.floor(state.currentTime * 30)} | Word Count: ${state.captions.length}`;
+          highlightActiveSubtitleWord(state.currentTime);
+          drawCanvas(state.currentTime);
+          if (el.timelineScrollContainer) {
+            el.timelineScrollContainer.scrollLeft = state.currentTime * PIXELS_PER_SECOND;
+          }
+        } else {
+          if (el.vmTimeDisplay) {
+            el.vmTimeDisplay.textContent = `${formatTime(state.videoMode.currentTime)} / ${formatTime(totalDuration)}`;
+          }
+          el.timelinePositionDisplay.textContent = `Time: ${state.videoMode.currentTime.toFixed(2)}s | Frame: ${Math.floor(state.videoMode.currentTime * 30)} | Word Count: ${state.videoMode.captions.length}`;
+          highlightActiveSubtitleWord(state.videoMode.currentTime);
+          vmDrawCanvas(state.videoMode.currentTime);
+          if (el.timelineScrollContainer) {
+            el.timelineScrollContainer.scrollLeft = state.videoMode.currentTime * PIXELS_PER_SECOND;
+          }
         }
       }
     });
@@ -1834,6 +1856,27 @@ function transferCaptionsToVideoMode() {
   }));
   state.videoMode.rawWhisperChunks = null;
 
+  // Transfer audio file if it exists
+  if (state.audioFile) {
+    const objectUrl = URL.createObjectURL(state.audioFile);
+    state.videoMode.attachedAudio = {
+      file: state.audioFile,
+      buffer: state.audioBuffer,
+      objectUrl: objectUrl
+    };
+    
+    // Update the VM audio attach details UI
+    if (el.vmAttachedAudioDetails) el.vmAttachedAudioDetails.classList.remove('hidden');
+    if (el.vmAttachedAudioName) el.vmAttachedAudioName.textContent = state.audioFile.name;
+    if (el.vmAttachedAudioSize) el.vmAttachedAudioSize.textContent = `${(state.audioFile.size / 1024 / 1024).toFixed(2)} MB`;
+    if (el.vmAudioBadge) el.vmAudioBadge.classList.remove('hidden');
+    
+    // Also load it in vmWavesurfer
+    if (vmWavesurfer) {
+      vmWavesurfer.load(objectUrl);
+    }
+  }
+
   vmRenderSubtitleEditor();
   vmDrawCanvas(state.videoMode.currentTime || 0);
   if (el.vmBtnExportSRT) el.vmBtnExportSRT.removeAttribute('disabled');
@@ -1844,7 +1887,9 @@ function transferCaptionsToVideoMode() {
 
   if (!state.videoMode.videoFile) {
     vmShowUploadPrompt();
-    vmAddLogLine('Captions imported from Caption Mode. Upload a video to continue in Video Mode.');
+    vmAddLogLine('Captions and Audio imported from Caption Mode. Upload a video to continue in Video Mode.');
+  } else {
+    vmAddLogLine('Captions and Audio imported from Caption Mode successfully.');
   }
 }
 
@@ -2457,16 +2502,45 @@ function disableExporters() {
   }
 }
 
-function syncCaptionTimestampsWithClips() {
-  if (!state.clips || state.clips.length === 0) return;
+function ensureCaptionSourceTimes() {
+  const clips = state.appMode === 'caption' ? state.clips : state.videoMode.clips;
+  const captions = state.appMode === 'caption' ? state.captions : state.videoMode.captions;
   
-  state.captions.forEach(c => {
+  if (!clips || clips.length === 0) return;
+
+  captions.forEach(c => {
+    if (c.sourceStart === undefined) {
+      const clip = clips.find(clip => c.start >= clip.timelineStart && c.start <= clip.timelineEnd);
+      if (clip) {
+        c.sourceStart = parseFloat((clip.sourceStart + (c.start - clip.timelineStart)).toFixed(3));
+      } else {
+        c.sourceStart = c.start;
+      }
+    }
+    if (c.sourceEnd === undefined) {
+      const clip = clips.find(clip => c.end >= clip.timelineStart && c.end <= clip.timelineEnd);
+      if (clip) {
+        c.sourceEnd = parseFloat((clip.sourceStart + (c.end - clip.timelineStart)).toFixed(3));
+      } else {
+        c.sourceEnd = c.end;
+      }
+    }
+  });
+}
+
+function syncCaptionTimestampsWithClips() {
+  const clips = state.appMode === 'caption' ? state.clips : state.videoMode.clips;
+  const captions = state.appMode === 'caption' ? state.captions : state.videoMode.captions;
+
+  if (!clips || clips.length === 0) return;
+  
+  captions.forEach(c => {
     // Ensure baseline source times are set
     if (c.sourceStart === undefined) c.sourceStart = c.start;
     if (c.sourceEnd === undefined) c.sourceEnd = c.end;
 
     // Find which clip covers the original source time of this caption
-    const clip = state.clips.find(clip => c.sourceStart >= clip.sourceStart && c.sourceStart <= clip.sourceEnd);
+    const clip = clips.find(clip => c.sourceStart >= clip.sourceStart && c.sourceStart <= clip.sourceEnd);
     if (clip) {
       // Calculate relative position within the clip and set timeline start/end
       c.start = parseFloat((clip.timelineStart + (c.sourceStart - clip.sourceStart)).toFixed(3));
@@ -2488,27 +2562,7 @@ function syncCaptionTimestampsWithClips() {
 }
 
 function onCaptionsUpdated() {
-  // Ensure baseline source times are populated first based on active clips
-  state.captions.forEach(c => {
-    if (c.sourceStart === undefined) {
-      const clip = state.clips && state.clips.find(clip => c.start >= clip.timelineStart && c.start <= clip.timelineEnd);
-      if (clip) {
-        c.sourceStart = parseFloat((clip.sourceStart + (c.start - clip.timelineStart)).toFixed(3));
-      } else {
-        c.sourceStart = c.start;
-      }
-    }
-    if (c.sourceEnd === undefined) {
-      const clip = state.clips && state.clips.find(clip => c.end >= clip.timelineStart && c.end <= clip.timelineEnd);
-      if (clip) {
-        c.sourceEnd = parseFloat((clip.sourceStart + (c.end - clip.timelineStart)).toFixed(3));
-      } else {
-        c.sourceEnd = c.end;
-      }
-    }
-  });
-
-  // Calculate matching timeline positions based on active clips
+  ensureCaptionSourceTimes();
   syncCaptionTimestampsWithClips();
 
   renderSubtitleEditor();
@@ -2567,6 +2621,7 @@ function renderSubtitleEditor() {
     textInput.addEventListener('change', (e) => {
       state.captions[index].word = e.target.value;
       drawCanvas(wavesurfer.getCurrentTime());
+      renderTimelineWords();
     });
     card.appendChild(textInput);
 
@@ -2649,7 +2704,9 @@ function renderTimelineWords() {
   
   track.innerHTML = '';
   
-  if (state.captions.length === 0) {
+  const data = getActiveTimelineData();
+  
+  if (data.captions.length === 0) {
     const placeholder = document.createElement('div');
     placeholder.className = 'timeline-no-data-msg';
     placeholder.textContent = 'Upload audio file to view caption timeline';
@@ -2657,7 +2714,7 @@ function renderTimelineWords() {
     return;
   }
   
-  state.captions.forEach((cap, index) => {
+  data.captions.forEach((cap, index) => {
     const block = document.createElement('div');
     block.className = 'timeline-word-block';
     block.id = `timeline-word-${index}`;
@@ -2675,14 +2732,14 @@ function renderTimelineWords() {
     span.textContent = cap.word;
     block.appendChild(span);
     
-    // Clicking seeks WaveSurfer playhead AND scrolls the editor card into view
+    // Clicking seeks playhead AND scrolls the editor card into view
     block.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (wavesurfer) {
-        wavesurfer.setTime(cap.start);
+      if (data.wavesurfer) {
+        data.wavesurfer.setTime(cap.start);
       }
       // Also scroll the corresponding editor card into view
-      const card = document.getElementById(`edit-card-${index}`);
+      const card = document.getElementById(`${data.cardPrefix}-${index}`);
       if (card) {
         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         card.classList.add('active-playing');
@@ -2705,7 +2762,7 @@ function renderTimelineWords() {
       
       // Delay slightly to allow panel display transition, then scroll and focus
       setTimeout(() => {
-        const card = document.getElementById(`edit-card-${index}`);
+        const card = document.getElementById(`${data.cardPrefix}-${index}`);
         if (card) {
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
           const input = card.querySelector('input[type="text"]');
@@ -2727,7 +2784,8 @@ function renderTimelineRuler() {
   if (!canvas) return;
 
   const ctx = canvas.getContext('2d');
-  const duration = state.audioDuration || 0;
+  const data = getActiveTimelineData();
+  const duration = data.duration;
   const width = duration * PIXELS_PER_SECOND;
 
   // Set canvas dimensions
@@ -2777,22 +2835,22 @@ function renderTimelineRuler() {
   }
 }
 
-
 function highlightActiveSubtitleWord(time) {
   document.querySelectorAll('.word-edit-card').forEach(card => card.classList.remove('active-playing'));
   document.querySelectorAll('.timeline-word-block').forEach(block => block.classList.remove('active'));
 
-  const activeIndex = state.captions.findIndex(c => time >= c.start && time <= c.end);
+  const data = getActiveTimelineData();
+  const activeIndex = data.captions.findIndex(c => time >= c.start && time <= c.end);
   if (activeIndex !== -1) {
     state.activeCaptionIndex = activeIndex;
     
     // Sidebar card highlight
-    const card = document.getElementById(`edit-card-${activeIndex}`);
+    const card = document.getElementById(`${data.cardPrefix}-${activeIndex}`);
     if (card) {
       card.classList.add('active-playing');
       
       // Manual scroll container scrolling that NEVER bubbles up to the main window viewport
-      const container = el.wordTimelineList;
+      const container = data.container;
       if (container) {
         const cardTop = card.offsetTop;
         const cardHeight = card.offsetHeight;
@@ -3590,9 +3648,42 @@ function formatSRTTime(seconds) {
 
 // --- Multi-clip Timeline Helper Functions ---
 
+function getActiveTimelineData() {
+  if (state.appMode === 'caption') {
+    return {
+      captions: state.captions,
+      clips: state.clips,
+      duration: state.audioDuration || 0,
+      wavesurfer: wavesurfer,
+      currentTime: state.currentTime,
+      selectedClipId: state.selectedClipId,
+      cardPrefix: 'edit-card',
+      container: el.wordTimelineList,
+      setClips: (val) => { state.clips = val; },
+      setCaptions: (val) => { state.captions = val; },
+      setSelectedClipId: (val) => { state.selectedClipId = val; }
+    };
+  } else {
+    return {
+      captions: state.videoMode.captions,
+      clips: state.videoMode.clips,
+      duration: state.videoMode.videoDuration || 0,
+      wavesurfer: vmWavesurfer,
+      currentTime: state.videoMode.currentTime,
+      selectedClipId: state.videoMode.selectedClipId,
+      cardPrefix: 'vm-edit-card',
+      container: el.vmWordTimelineList,
+      setClips: (val) => { state.videoMode.clips = val; },
+      setCaptions: (val) => { state.videoMode.captions = val; },
+      setSelectedClipId: (val) => { state.videoMode.selectedClipId = val; }
+    };
+  }
+}
+
 function getMediaTimeFromTimelineTime(t) {
-  if (!state.clips || state.clips.length === 0) return { time: t, clip: null };
-  const clip = state.clips.find(c => t >= c.timelineStart && t <= c.timelineEnd);
+  const data = getActiveTimelineData();
+  if (!data.clips || data.clips.length === 0) return { time: t, clip: null };
+  const clip = data.clips.find(c => t >= c.timelineStart && t <= c.timelineEnd);
   if (clip) {
     const relativeTime = t - clip.timelineStart;
     const sourceTime = clip.sourceStart + relativeTime;
@@ -3602,8 +3693,9 @@ function getMediaTimeFromTimelineTime(t) {
 }
 
 function getTimelineTimeFromMediaTime(sourceTime) {
-  if (!state.clips || state.clips.length === 0) return sourceTime;
-  const clip = state.clips.find(c => sourceTime >= c.sourceStart && sourceTime <= c.sourceEnd);
+  const data = getActiveTimelineData();
+  if (!data.clips || data.clips.length === 0) return sourceTime;
+  const clip = data.clips.find(c => sourceTime >= c.sourceStart && sourceTime <= c.sourceEnd);
   if (clip) {
     const relativeTime = sourceTime - clip.sourceStart;
     return clip.timelineStart + relativeTime;
@@ -3671,7 +3763,9 @@ function renderTimelineVideoTrack() {
 
   track.innerHTML = '';
 
-  if (!state.clips || state.clips.length === 0) {
+  const data = getActiveTimelineData();
+
+  if (!data.clips || data.clips.length === 0) {
     const placeholder = document.createElement('div');
     placeholder.className = 'timeline-no-data-msg';
     placeholder.textContent = 'Upload video/audio file to view clips';
@@ -3683,12 +3777,12 @@ function renderTimelineVideoTrack() {
   }
 
   if (el.btnSplitClip) el.btnSplitClip.disabled = false;
-  if (el.btnDeleteClip) el.btnDeleteClip.disabled = !state.selectedClipId;
+  if (el.btnDeleteClip) el.btnDeleteClip.disabled = !data.selectedClipId;
 
-  state.clips.forEach(clip => {
+  data.clips.forEach(clip => {
     const block = document.createElement('div');
     block.className = 'timeline-clip';
-    if (clip.id === state.selectedClipId) {
+    if (clip.id === data.selectedClipId) {
       block.classList.add('selected');
     }
     block.dataset.id = clip.id;
@@ -3731,7 +3825,7 @@ function renderTimelineVideoTrack() {
     // Click to select
     block.addEventListener('click', (e) => {
       e.stopPropagation();
-      state.selectedClipId = clip.id;
+      data.setSelectedClipId(clip.id);
       renderTimelineVideoTrack();
     });
 
@@ -3750,7 +3844,7 @@ function renderTimelineVideoTrack() {
       trimLeftInitialSourceStart = clip.sourceStart;
       trimLeftInitialTimelineStart = clip.timelineStart;
       trimLeftInitialTimelineEnd = clip.timelineEnd;
-      state.selectedClipId = clip.id;
+      data.setSelectedClipId(clip.id);
       block.classList.add('trimming-left');
       renderTimelineVideoTrack();
     });
@@ -3762,7 +3856,7 @@ function renderTimelineVideoTrack() {
       const deltaX = e.clientX - trimLeftStartX;
       const deltaSeconds = deltaX / PIXELS_PER_SECOND;
 
-      const precedingClip = state.clips
+      const precedingClip = data.clips
         .filter(c => c.timelineEnd <= trimLeftInitialTimelineStart && c.id !== clip.id)
         .sort((a, b) => b.timelineEnd - a.timelineEnd)[0];
 
@@ -3794,8 +3888,14 @@ function renderTimelineVideoTrack() {
       leftHandle.releasePointerCapture(e.pointerId);
       block.classList.remove('trimming-left');
 
-      state.clips.sort((a, b) => a.timelineStart - b.timelineStart);
-      onCaptionsUpdated();
+      const sorted = [...data.clips].sort((a, b) => a.timelineStart - b.timelineStart);
+      data.setClips(sorted);
+      
+      if (state.appMode === 'caption') {
+        onCaptionsUpdated();
+      } else {
+        vmOnCaptionsUpdated();
+      }
       renderTimelineVideoTrack();
     });
 
@@ -3814,7 +3914,7 @@ function renderTimelineVideoTrack() {
       trimRightInitialSourceEnd = clip.sourceEnd;
       trimRightInitialTimelineStart = clip.timelineStart;
       trimRightInitialTimelineEnd = clip.timelineEnd;
-      state.selectedClipId = clip.id;
+      data.setSelectedClipId(clip.id);
       block.classList.add('trimming-right');
       renderTimelineVideoTrack();
     });
@@ -3826,14 +3926,14 @@ function renderTimelineVideoTrack() {
       const deltaX = e.clientX - trimRightStartX;
       const deltaSeconds = deltaX / PIXELS_PER_SECOND;
 
-      const succeedingClip = state.clips
+      const succeedingClip = data.clips
         .filter(c => c.timelineStart >= trimRightInitialTimelineEnd && c.id !== clip.id)
         .sort((a, b) => a.timelineStart - b.timelineStart)[0];
 
       // Limit expansion right by succeeding clip timelineStart or original source duration end
       const maxTimelineEnd = Math.min(
         succeedingClip ? succeedingClip.timelineStart : Infinity,
-        trimRightInitialTimelineEnd + (state.audioDuration - trimRightInitialSourceEnd)
+        trimRightInitialTimelineEnd + (data.duration - trimRightInitialSourceEnd)
       );
 
       // Limit trimming left: minimum duration 0.5s
@@ -3857,8 +3957,14 @@ function renderTimelineVideoTrack() {
       rightHandle.releasePointerCapture(e.pointerId);
       block.classList.remove('trimming-right');
 
-      state.clips.sort((a, b) => a.timelineStart - b.timelineStart);
-      onCaptionsUpdated();
+      const sorted = [...data.clips].sort((a, b) => a.timelineStart - b.timelineStart);
+      data.setClips(sorted);
+      
+      if (state.appMode === 'caption') {
+        onCaptionsUpdated();
+      } else {
+        vmOnCaptionsUpdated();
+      }
       renderTimelineVideoTrack();
     });
 
@@ -3878,7 +3984,7 @@ function renderTimelineVideoTrack() {
       startX = e.clientX;
       initialTimelineStart = clip.timelineStart;
       initialTimelineEnd = clip.timelineEnd;
-      state.selectedClipId = clip.id;
+      data.setSelectedClipId(clip.id);
       block.classList.add('dragging');
       renderTimelineVideoTrack();
     });
@@ -3890,10 +3996,10 @@ function renderTimelineVideoTrack() {
       const deltaX = e.clientX - startX;
       const deltaSeconds = deltaX / PIXELS_PER_SECOND;
 
-      const precedingClip = state.clips
+      const precedingClip = data.clips
         .filter(c => c.timelineEnd <= initialTimelineStart && c.id !== clip.id)
         .sort((a, b) => b.timelineEnd - a.timelineEnd)[0];
-      const succeedingClip = state.clips
+      const succeedingClip = data.clips
         .filter(c => c.timelineStart >= initialTimelineEnd && c.id !== clip.id)
         .sort((a, b) => a.timelineStart - b.timelineStart)[0];
 
@@ -3927,10 +4033,9 @@ function renderTimelineVideoTrack() {
 
       // Check for slot swap / re-ordering
       const dragCenter = (clip.timelineStart + clip.timelineEnd) / 2;
-      const overlapClip = state.clips.find(c => c.id !== clip.id && dragCenter >= c.timelineStart && dragCenter <= c.timelineEnd);
+      const overlapClip = data.clips.find(c => c.id !== clip.id && dragCenter >= c.timelineStart && dragCenter <= c.timelineEnd);
 
       if (overlapClip) {
-        // Swap their slots in Canva magnetic style
         const aStart = overlapClip.timelineStart;
         const bStart = initialTimelineStart;
         
@@ -3938,14 +4043,12 @@ function renderTimelineVideoTrack() {
         const durationB = initialTimelineEnd - initialTimelineStart;
 
         if (initialTimelineStart > overlapClip.timelineStart) {
-          // clip was after overlapClip, now moved before overlapClip
           clip.timelineStart = aStart;
           clip.timelineEnd = aStart + durationB;
           
           overlapClip.timelineStart = clip.timelineEnd;
           overlapClip.timelineEnd = overlapClip.timelineStart + durationA;
         } else {
-          // clip was before overlapClip, now moved after overlapClip
           overlapClip.timelineStart = bStart;
           overlapClip.timelineEnd = bStart + durationA;
           
@@ -3954,9 +4057,14 @@ function renderTimelineVideoTrack() {
         }
       }
 
-      state.clips.sort((a, b) => a.timelineStart - b.timelineStart);
+      const sorted = [...data.clips].sort((a, b) => a.timelineStart - b.timelineStart);
+      data.setClips(sorted);
       
-      onCaptionsUpdated();
+      if (state.appMode === 'caption') {
+        onCaptionsUpdated();
+      } else {
+        vmOnCaptionsUpdated();
+      }
       renderTimelineVideoTrack();
     });
 
@@ -3965,17 +4073,18 @@ function renderTimelineVideoTrack() {
 }
 
 function splitSelectedClip() {
-  if (!state.clips || state.clips.length === 0) return;
+  const data = getActiveTimelineData();
+  if (!data.clips || data.clips.length === 0) return;
   
-  const currentTime = state.currentTime;
-  const activeClipIndex = state.clips.findIndex(c => currentTime > c.timelineStart && currentTime < c.timelineEnd);
+  const currentTime = data.currentTime;
+  const activeClipIndex = data.clips.findIndex(c => currentTime > c.timelineStart && currentTime < c.timelineEnd);
   
   if (activeClipIndex === -1) {
     alert("Seek playhead to a valid position within a clip to split.");
     return;
   }
   
-  const activeClip = state.clips[activeClipIndex];
+  const activeClip = data.clips[activeClipIndex];
   const relativeSplitTime = currentTime - activeClip.timelineStart;
   const sourceSplitTime = activeClip.sourceStart + relativeSplitTime;
   
@@ -4004,11 +4113,14 @@ function splitSelectedClip() {
     thumbnails: activeClip.thumbnails ? activeClip.thumbnails.slice(1) : []
   };
   
-  state.clips.splice(activeClipIndex, 1, clipA, clipB);
-  state.selectedClipId = clipB.id;
+  const newClips = [...data.clips];
+  newClips.splice(activeClipIndex, 1, clipA, clipB);
+  data.setClips(newClips);
+  data.setSelectedClipId(clipB.id);
   
-  if (activeClip.type === 'video' && state.audioFile) {
-    const objectUrl = URL.createObjectURL(state.audioFile);
+  const file = state.appMode === 'caption' ? state.audioFile : state.videoMode.videoFile;
+  if (activeClip.type === 'video' && file) {
+    const objectUrl = URL.createObjectURL(file);
     generateClipThumbnails(clipA, objectUrl).then(thumbs => {
       clipA.thumbnails = thumbs;
       renderTimelineVideoTrack();
@@ -4019,30 +4131,42 @@ function splitSelectedClip() {
     });
   }
   
-  onCaptionsUpdated();
+  if (state.appMode === 'caption') {
+    onCaptionsUpdated();
+  } else {
+    vmOnCaptionsUpdated();
+  }
   renderTimelineVideoTrack();
 }
 
 function deleteSelectedClip() {
-  if (!state.selectedClipId) return;
+  const data = getActiveTimelineData();
+  if (!data.selectedClipId) return;
   
-  const clipIndex = state.clips.findIndex(c => c.id === state.selectedClipId);
+  const clipIndex = data.clips.findIndex(c => c.id === data.selectedClipId);
   if (clipIndex === -1) return;
   
-  const deletedClip = state.clips[clipIndex];
+  const deletedClip = data.clips[clipIndex];
   const gapDuration = deletedClip.timelineEnd - deletedClip.timelineStart;
   
-  state.clips.splice(clipIndex, 1);
+  const newClips = [...data.clips];
+  newClips.splice(clipIndex, 1);
   
-  state.clips.forEach(c => {
+  newClips.forEach(c => {
     if (c.timelineStart > deletedClip.timelineStart) {
       c.timelineStart = parseFloat((c.timelineStart - gapDuration).toFixed(3));
       c.timelineEnd = parseFloat((c.timelineEnd - gapDuration).toFixed(3));
     }
   });
   
-  state.selectedClipId = null;
-  onCaptionsUpdated();
+  data.setClips(newClips);
+  data.setSelectedClipId(null);
+  
+  if (state.appMode === 'caption') {
+    onCaptionsUpdated();
+  } else {
+    vmOnCaptionsUpdated();
+  }
   renderTimelineVideoTrack();
 }
 
@@ -4124,6 +4248,7 @@ function switchMode(mode) {
   const captionLayout = document.getElementById('desktopLayout');
   const videoLayout = el.videoModeLayout;
   const mobileLayout = document.getElementById('mobileLayout');
+  const mobileTimelineSection = document.getElementById('mobileTimelineSection');
 
   if (window.innerWidth < 992) {
     state.appMode = 'caption';
@@ -4136,13 +4261,26 @@ function switchMode(mode) {
     return;
   }
 
+  const audioWaveform = document.getElementById('audioWaveform');
+  const vmAudioWaveform = document.getElementById('vmAudioWaveform');
+
   if (mode === 'caption') {
     captionLayout?.classList.remove('hidden');
     videoLayout?.classList.add('hidden');
     el.btnCaptionMode?.classList.add('active');
     el.btnVideoMode?.classList.remove('active');
     if (el.btnSplitClip?.parentElement) el.btnSplitClip.parentElement.hidden = true;
+    
+    // Migrate style panel and timeline back to Caption Mode
     vmMoveStylePanel(document.getElementById('desktopLeftContent'));
+    const centerContent = document.getElementById('desktopCenterContent');
+    if (centerContent && mobileTimelineSection) {
+      centerContent.appendChild(mobileTimelineSection);
+    }
+    
+    // Show Caption Mode waveform and hide VM waveform
+    if (audioWaveform) audioWaveform.classList.remove('hidden');
+    if (vmAudioWaveform) vmAudioWaveform.classList.add('hidden');
   } else {
     captionLayout?.classList.add('hidden');
     videoLayout?.classList.remove('hidden');
@@ -4150,20 +4288,33 @@ function switchMode(mode) {
     el.btnVideoMode?.classList.add('active');
     if (el.btnSplitClip?.parentElement) el.btnSplitClip.parentElement.hidden = false;
 
+    // Migrate style panel and timeline to Video Mode
+    vmMoveStylePanel(document.getElementById('vmLeftContent'));
+    const vmCenterContent = document.getElementById('vmCenterContent');
+    if (vmCenterContent && mobileTimelineSection) {
+      vmCenterContent.appendChild(mobileTimelineSection);
+    }
+
+    // Hide Caption Mode waveform and show VM waveform
+    if (audioWaveform) audioWaveform.classList.add('hidden');
+    if (vmAudioWaveform) vmAudioWaveform.classList.remove('hidden');
+
     // Initialize VM canvas context on first switch
     if (!vmCtx && el.vmPreviewCanvas) {
       vmCtx = el.vmPreviewCanvas.getContext('2d');
       vmDrawCanvas(0);
     }
 
-    // Mirror caption style panel into VM left panel
-    vmMoveStylePanel(document.getElementById('vmLeftContent'));
-
     // Initialize vmWavesurfer if not yet done
     if (!vmWavesurfer) {
       setupVmWaveSurfer();
     }
   }
+
+  // Synchronize and redraw the timeline for the newly selected mode
+  renderTimelineRuler();
+  renderTimelineWords();
+  renderTimelineVideoTrack();
 }
 
 // Mirror the style panel contents into VM left panel
@@ -4201,7 +4352,7 @@ function setupVmWaveSurfer() {
 
   try {
     vmWavesurfer = WaveSurfer.create({
-      container: '#vmWaveformDiv',
+      container: '#vmAudioWaveform',
       waveColor: 'rgba(142, 142, 159, 0.3)',
       progressColor: secondary,
       cursorColor: primary,
@@ -4238,6 +4389,11 @@ function setupVmWaveSurfer() {
           state.videoMode.videoBgElement.currentTime = time;
         }
       }
+      // Also scroll timeline to time
+      if (el.timelineScrollContainer) {
+        el.timelineScrollContainer.scrollLeft = time * PIXELS_PER_SECOND;
+      }
+      highlightActiveSubtitleWord(time);
     });
 
     vmWavesurfer.on('play', () => {
@@ -4262,10 +4418,23 @@ function setupVmWaveSurfer() {
     });
 
     vmWavesurfer.on('ready', () => {
-      const waveformDuration = vmWavesurfer.getDuration();
-      const dur = state.videoMode.videoDuration || waveformDuration;
+      state.videoMode.videoDuration = vmWavesurfer.getDuration();
+      const dur = state.videoMode.videoDuration;
       if (el.vmTimeDisplay) el.vmTimeDisplay.textContent = `00:00.0 / ${formatTime(dur)}`;
       if (el.vmWaveformContainer) el.vmWaveformContainer.style.display = '';
+      
+      if (typeof vmWavesurfer.zoom === 'function') {
+        vmWavesurfer.zoom(PIXELS_PER_SECOND);
+      }
+      
+      const trackWidth = dur * PIXELS_PER_SECOND;
+      if (el.timelineTracksWidthWrapper) {
+        el.timelineTracksWidthWrapper.style.width = `${trackWidth}px`;
+      }
+      
+      renderTimelineRuler();
+      renderTimelineWords();
+      renderTimelineVideoTrack();
     });
 
   } catch(err) {
@@ -4283,6 +4452,18 @@ function vmStartRenderLoop() {
     state.videoMode.currentTime = time;
     const dur = state.videoMode.videoDuration;
     if (el.vmTimeDisplay) el.vmTimeDisplay.textContent = `${formatTime(time)} / ${formatTime(dur)}`;
+    
+    // Highlight subtitle word and scroll timeline
+    highlightActiveSubtitleWord(time);
+    
+    if (el.timelinePositionDisplay) {
+      el.timelinePositionDisplay.textContent = `Time: ${time.toFixed(2)}s | Frame: ${Math.floor(time * 30)} | Word Count: ${state.videoMode.captions.length}`;
+    }
+    
+    if (el.timelineScrollContainer) {
+      el.timelineScrollContainer.scrollLeft = time * PIXELS_PER_SECOND;
+    }
+    
     vmDrawCanvas(time);
     vmRafId = requestAnimationFrame(step);
   };
@@ -4809,6 +4990,7 @@ function vmRealignCaptions() {
 function vmOnCaptionsUpdated() {
   vmRenderSubtitleEditor();
   vmDrawCanvas(state.videoMode.currentTime);
+  renderTimelineWords();
 
   // Enable export buttons
   if (el.vmBtnExportVideo) el.vmBtnExportVideo.removeAttribute('disabled');
@@ -4863,18 +5045,22 @@ function vmRenderSubtitleEditor() {
     wordInput.addEventListener('change', () => {
       captions[index].word = wordInput.value;
       vmDrawCanvas(state.videoMode.currentTime);
+      renderTimelineWords();
     });
     startInput.addEventListener('change', () => {
       captions[index].start = parseFloat(startInput.value);
+      renderTimelineWords();
     });
     endInput.addEventListener('change', () => {
       captions[index].end = parseFloat(endInput.value);
+      renderTimelineWords();
     });
 
     card.querySelector('.word-card-delete').addEventListener('click', () => {
       state.videoMode.captions.splice(index, 1);
       vmRenderSubtitleEditor();
       vmDrawCanvas(state.videoMode.currentTime);
+      renderTimelineWords();
     });
 
     card.addEventListener('click', () => {
