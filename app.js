@@ -244,6 +244,9 @@ const el = {
 
   // ——— VIDEO MODE elements ———
   videoModeLayout: document.getElementById('videoModeLayout'),
+  vmMandatoryUploadOverlay: document.getElementById('vmMandatoryUploadOverlay'),
+  vmBtnMandatoryUpload: document.getElementById('vmBtnMandatoryUpload'),
+  vmBtnMandatoryCancel: document.getElementById('vmBtnMandatoryCancel'),
   desktopLayout: document.getElementById('desktopLayout'),
   btnCaptionMode: document.getElementById('btnCaptionMode'),
   btnVideoMode: document.getElementById('btnVideoMode'),
@@ -1887,7 +1890,10 @@ function transferCaptionsToVideoMode() {
 
   if (!state.videoMode.videoFile) {
     vmShowUploadPrompt();
-    vmAddLogLine('Captions and Audio imported from Caption Mode. Upload a video to continue in Video Mode.');
+    vmAddLogLine('Captions and Audio imported from Caption Mode. Please select a background video file.');
+    setTimeout(() => {
+      el.vmVideoFileInput?.click();
+    }, 150);
   } else {
     vmAddLogLine('Captions and Audio imported from Caption Mode successfully.');
   }
@@ -4299,6 +4305,13 @@ function switchMode(mode) {
     if (audioWaveform) audioWaveform.classList.add('hidden');
     if (vmAudioWaveform) vmAudioWaveform.classList.remove('hidden');
 
+    // Toggle mandatory upload overlay based on video existence
+    if (!state.videoMode.videoFile) {
+      el.vmMandatoryUploadOverlay?.classList.remove('hidden');
+    } else {
+      el.vmMandatoryUploadOverlay?.classList.add('hidden');
+    }
+
     // Initialize VM canvas context on first switch
     if (!vmCtx && el.vmPreviewCanvas) {
       vmCtx = el.vmPreviewCanvas.getContext('2d');
@@ -4635,6 +4648,7 @@ async function handleVideoModeUpload(file) {
   }
 
   state.videoMode.videoFile = file;
+  el.vmMandatoryUploadOverlay?.classList.add('hidden');
 
   // Update file details UI
   if (el.vmVideoFileDetails) el.vmVideoFileDetails.classList.remove('hidden');
@@ -4804,6 +4818,8 @@ function vmRemoveVideo() {
   state.videoMode.videoDuration = 0;
   state.videoMode.captions = [];
   state.videoMode.clips = [];
+
+  el.vmMandatoryUploadOverlay?.classList.remove('hidden');
 
   if (el.vmVideoFileDetails) el.vmVideoFileDetails.classList.add('hidden');
   if (el.vmVideoFileHint) el.vmVideoFileHint.classList.remove('hidden');
@@ -5223,6 +5239,14 @@ function setupVMEventListeners() {
   // Mode switcher
   el.btnCaptionMode?.addEventListener('click', () => switchMode('caption'));
   el.btnVideoMode?.addEventListener('click', () => switchMode('video'));
+
+  // Mandatory video upload overlay button events
+  el.vmBtnMandatoryUpload?.addEventListener('click', () => {
+    el.vmVideoFileInput?.click();
+  });
+  el.vmBtnMandatoryCancel?.addEventListener('click', () => {
+    switchMode('caption');
+  });
 
   // VM canvas overlay click to upload
   el.vmCanvasOverlay?.addEventListener('click', () => {

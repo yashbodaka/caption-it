@@ -2539,10 +2539,85 @@ body.dark-theme .canvas-overlay.clickable:hover {
   padding: 12px;
   box-sizing: border-box;
   overflow: hidden;
+  position: relative;
 }
 
 .video-mode-layout.hidden {
   display: none !important;
+}
+
+/* ==========================================================================
+   VIDEO MODE — Mandatory Upload Overlay
+   ========================================================================== */
+
+.vm-mandatory-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(26, 26, 36, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: mode-fade-in 0.25s ease;
+}
+
+.vm-mandatory-overlay.hidden {
+  display: none !important;
+}
+
+.mandatory-card {
+  max-width: 420px;
+  width: 90%;
+  padding: 36px 32px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 117, 151, 0.25);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mandatory-icon {
+  font-size: 52px;
+  color: var(--primary);
+  margin-bottom: 20px;
+  animation: pulse 2.5s infinite ease-in-out;
+}
+
+.mandatory-card h2 {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.mandatory-card p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 28px;
+}
+
+.mandatory-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.mandatory-actions button {
+  width: 100%;
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 50px;
 }
 
 .vm-panel {

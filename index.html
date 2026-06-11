@@ -652,6 +652,19 @@
       <!-- ============================================================ -->
       <div class="video-mode-layout hidden" id="videoModeLayout">
 
+        <!-- Mandatory Video Upload Overlay -->
+        <div id="vmMandatoryUploadOverlay" class="vm-mandatory-overlay">
+          <div class="mandatory-card glass-panel animate-scale-up">
+            <div class="mandatory-icon"><i class="fa-solid fa-clapperboard"></i></div>
+            <h2>Video Required</h2>
+            <p>To enter Video Mode, you must upload a background video file to composite with your audio and captions.</p>
+            <div class="mandatory-actions">
+              <button id="vmBtnMandatoryUpload" class="btn-primary"><i class="fa-solid fa-cloud-arrow-up"></i> Select Video File</button>
+              <button id="vmBtnMandatoryCancel" class="btn-secondary"><i class="fa-solid fa-arrow-left"></i> Go Back</button>
+            </div>
+          </div>
+        </div>
+
         <!-- VM Left Panel: Caption Customizer (same style controls, shared via JS) -->
         <section class="panel left-panel glass-panel vm-panel">
           <div class="panel-header">
